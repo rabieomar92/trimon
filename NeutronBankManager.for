@@ -1,7 +1,20 @@
-!
-!     Module NeutronBankManager. Author M. R. Omar, October 2017.
+!                                                                       
+!     Neutron Bank Manager Module, Revision 180915-1.
+!     Author M. R. Omar, October 2017. All copyrights reserved, 2017.
 !     (c) Universiti Sains Malaysia
-!     (c) Agensi Nuklear Malaysia
+!     (c) Malaysian Nuclear Agency
+!
+!     NOTICE:  All information contained herein is, and remains the pro-
+!     perty of the copyright owners  and  their suppliers,  if any.  The 
+!     intellectual and technical concepts contained herein are  proprie-
+!     tary to the copyright owners and their suppliers and are protected
+!     by  trade  secret  or  copyright  law.    Dissemination  of   this 
+!     source  code  or  reproduction  of  this  source  code is strictly
+!     forbidden  unless  prior written permission  is  obtained from the 
+!     owners.
+!
+!     This source code was created on 1/11/2017 11:15 PM by M. R. Omar.
+!     Last revision date 15/9/2018.
 !
 
       module NeutronBankManager
@@ -29,6 +42,7 @@
          integer, allocatable :: ISTAT(:,:)  ! STATUS ((>4)-EMPTY, 0-WAIT_QUEUE,
                                              ! 1-KILLED, 2-ESCAPED, 3-RANDOM STRIDE OVERFLOW)
          real   , allocatable :: C_WGT(:,:)  ! NEUTRON WEIGHT.
+         real   , allocatable :: L_WGT(:,:)  ! LAST NEUTRON WEIGHT
          
          ! SPECIAL FISSION BANK
          
@@ -49,7 +63,7 @@
          integer, allocatable :: FISTAT(:,:)  ! STATUS ((>4)-EMPTY, 0-WAIT_QUEUE,
                                               ! 1-KILLED, 2-ESCAPED, 3-RANDOM STRIDE OVERFLOW)
          real   , allocatable :: FC_WGT(:,:)  ! NEUTRON WEIGHT.
-                                             
+         real   , allocatable :: FL_WGT(:,:)  ! LAST NEUTRON WEIGHT
          integer :: N_COUNT   ! TOTAL NUMBER OF NEUTRONS IN THE BANK
          integer :: N_SOURCE  ! NUMBER OF SOURCE NEUTRONS
          integer :: N_GROUP   ! NUMBER OF NEUTRON GROUPS
@@ -93,6 +107,7 @@
             allocate( PARNT(BANK_SIZE, 1) )
             allocate( ISTAT(BANK_SIZE, 1) )
             allocate( C_WGT(BANK_SIZE, 1) )
+            allocate( L_WGT(BANK_SIZE, 1) )
             ! INITIALIZE FISSION BANK
             allocate( FC_DIR(BANK_SIZE, 3) )
             allocate( FL_DIR(BANK_SIZE, 3) )
@@ -110,6 +125,7 @@
             allocate( FPARNT(BANK_SIZE, 1) )
             allocate( FISTAT(BANK_SIZE, 1) )
             allocate( FC_WGT(BANK_SIZE, 1) )
+            allocate( FL_WGT(BANK_SIZE, 1) )
             return
             
          end subroutine
@@ -177,10 +193,12 @@
             B_CEL(N_COUNT, 1) = iCell
             B_CEL(N_COUNT, 2) = iLayer
             C_GRP(N_COUNT, 1) = piG
+            L_GRP(N_COUNT, 1) = piG
             NCHLD(N_COUNT, 1) = 0         ! 0 - NO CHILD NEUTRONS
             PARNT(N_COUNT, 1) = -1        ! -1 NO PARENT
             ISTAT(N_COUNT, 1) = 0         ! 0 - WAIT_QUEUE
             C_WGT(N_COUNT, 1) = prWgt
+            L_WGT(N_COUNT, 1) = prWgt
             return
             
          end subroutine
@@ -225,6 +243,7 @@
             B_CEL(N_COUNT, 1) = iCell
             B_CEL(N_COUNT, 2) = iLayer
             C_GRP(N_COUNT, 1) = piG
+            L_GRP(N_COUNT, 1) = piG
             NCHLD(N_COUNT, 1) = 0         ! 0 - NO CHILD NEUTRONS
             PARNT(N_COUNT, 1) = piParent  
             ISTAT(N_COUNT, 1) = 0         ! 0 - WAIT_QUEUE     
@@ -233,7 +252,7 @@
             L_COL(N_COUNT, 3) = prZ
             L_RXN(N_COUNT, 1) = piLastRxn
             C_WGT(N_COUNT, 1) = prWgt
-            
+            L_WGT(N_COUNT, 1) = prWgt
             return
             
          end subroutine
@@ -281,10 +300,12 @@
             FB_CEL(N_KEFFSRC, 1) = iCell
             FB_CEL(N_KEFFSRC, 2) = iLayer
             FC_GRP(N_KEFFSRC, 1) = piG
+            FL_GRP(N_KEFFSRC, 1) = piG
             FNCHLD(N_KEFFSRC, 1) = 0         ! 0 - NO CHILD NEUTRONS
             FPARNT(N_KEFFSRC, 1) = -1        ! -1 NO PARENT
             FISTAT(N_KEFFSRC, 1) = N_WAIT         ! 0 - WAIT_QUEUE
-            FC_WGT(N_KEFFSRC, 1) = prWgt            
+            FC_WGT(N_KEFFSRC, 1) = prWgt  
+            FL_WGT(N_KEFFSRC, 1) = prWgt
             return
             
          end subroutine
@@ -373,7 +394,14 @@
      &                               C_DIR(piNID,1),
      &                               C_DIR(piNID,1),
      &                               iCell, iLayer)
-     
+                  if((C_DIR(piNID,1) .gt. TXS_CEL) .or. 
+     &               (C_DIR(piNID,1) .lt. -2     )) then
+                     C_DIR(piNID,1) = -2
+                  endif
+                  if((C_DIR(piNID,2) .gt. TXS_LAY) .or. 
+     &               (C_DIR(piNID,2) .lt. -2     )) then
+                     C_DIR(piNID,2) = -2
+                  endif
                   L_POS(piNID, 1) = C_POS(piNID, 1)
                   L_POS(piNID, 2) = C_POS(piNID, 2)
                   L_POS(piNID, 3) = C_POS(piNID, 3)      

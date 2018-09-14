@@ -1,7 +1,20 @@
 !                                                                       
-!     Module CellGeometry. Author M. R. Omar, October 2017. Revision 171101-1.
+!     Core Unit Cell Geometry Definition, Revision 180915-1.
+!     Author M. R. Omar, October 2017. All copyrights reserved, 2017.
 !     (c) Universiti Sains Malaysia
-!     (c) Agensi Nuklear Malaysia
+!     (c) Malaysian Nuclear Agency
+!
+!     NOTICE:  All information contained herein is, and remains the pro-
+!     perty of the copyright owners  and  their suppliers,  if any.  The 
+!     intellectual and technical concepts contained herein are  proprie-
+!     tary to the copyright owners and their suppliers and are protected
+!     by  trade  secret  or  copyright  law.    Dissemination  of   this 
+!     source  code  or  reproduction  of  this  source  code is strictly
+!     forbidden  unless  prior written permission  is  obtained from the 
+!     owners.
+!
+!     This source code was created on 1/10/2017 11:15 PM by M. R. Omar.
+!     Last revision date 15/9/2018.
 !
 !
 !     Methods:
@@ -57,35 +70,40 @@
       
 !     PLEASE MODIFY THESE PARAMETERS TO THE ACTUAL TRIGA CORE DIMENSIONS. WARNING,
 !     DO NOT MODIFY OTHER PARTS OF THIS CODE.
-         integer, parameter :: RING_COUNT                = 6
-         integer, parameter :: LAYER_COUNT               = 10
-         integer, parameter :: REFLECTOR_CELLID          = 92
-         integer, parameter :: ZERO_TRUNC                = 1E-05
-         real, parameter    :: REFLECTOR_THICKNESS       = 30.353
-         real   , parameter :: FUEL_LENGTH               = 38.1
-         real :: RING_RADIUS(RING_COUNT)   = 
-     &           (/ 9.08, 18.16, 27.24, 36.32, 45.40, 54.48/)
-         real :: LAYER_HEIGHT(LAYER_COUNT) =
-     &           (/ 1*FUEL_LENGTH / real(LAYER_COUNT),
-     &              2*FUEL_LENGTH / real(LAYER_COUNT),
-     &              3*FUEL_LENGTH / real(LAYER_COUNT),
-     &              4*FUEL_LENGTH / real(LAYER_COUNT),
-     &              5*FUEL_LENGTH / real(LAYER_COUNT),
-     &              6*FUEL_LENGTH / real(LAYER_COUNT),
-     &              7*FUEL_LENGTH / real(LAYER_COUNT),
-     &              8*FUEL_LENGTH / real(LAYER_COUNT),
-     &              9*FUEL_LENGTH / real(LAYER_COUNT),
-     &             10*FUEL_LENGTH / real(LAYER_COUNT) /)
+         integer :: RING_COUNT          = 6
+         integer :: REFLECTOR_CELLID    = 92
+         integer :: ZERO_TRUNC          = 1E-13
+         real    :: REFLECTOR_THICKNESS = 30.353
+         real    :: TOPREFLECTOR_THICKNESS = 0.0
+         real    :: BOTREFLECTOR_THICKNESS = 0.0
+         real    :: FUEL_LENGTH         = 38.1
+         integer :: LAYER_COUNT         = 20
+         real :: RING_RADIUS(7)   = 
+     &           (/ 9.08, 18.16, 27.24, 36.32, 45.40, 54.48, 0.0/)
+c         real :: LAYER_HEIGHT(LAYER_COUNT) =
+c     &           (/ 1*FUEL_LENGTH / real(LAYER_COUNT),
+c     &              2*FUEL_LENGTH / real(LAYER_COUNT),
+c     &              3*FUEL_LENGTH / real(LAYER_COUNT),
+c     &              4*FUEL_LENGTH / real(LAYER_COUNT),
+c     &              5*FUEL_LENGTH / real(LAYER_COUNT),
+c     &              6*FUEL_LENGTH / real(LAYER_COUNT),
+c     &              7*FUEL_LENGTH / real(LAYER_COUNT),
+c     &              8*FUEL_LENGTH / real(LAYER_COUNT),
+c     &              9*FUEL_LENGTH / real(LAYER_COUNT),
+c     &             10*FUEL_LENGTH / real(LAYER_COUNT) /)
      
+
      
       contains
 
+     
       real function LayerHeight(piLayerID)
          implicit none
          integer, intent(in) :: piLayerID
          LayerHeight = 0.0
          if((piLayerID .le. LAYER_COUNT) .and. (piLayerID .gt. 0)) then
-            LayerHeight = LAYER_HEIGHT(piLayerID)
+            LayerHeight = real(piLayerID) * FUEL_LENGTH / 
+     &                    real(LAYER_COUNT)
          endif
          return
       end function
@@ -107,6 +125,16 @@
       
       real function ReflectorThickness()
          ReflectorThickness = REFLECTOR_THICKNESS
+         return
+      end function
+      
+      real function TReflectorThickness()
+         TReflectorThickness = TOPREFLECTOR_THICKNESS
+         return
+      end function
+      
+      real function BReflectorThickness()
+         BReflectorThickness = BOTREFLECTOR_THICKNESS
          return
       end function
       
@@ -150,8 +178,35 @@
 !        IF THE PARTICLE IS OUTSIDE THE REFLECTOR & CORE, RETURNS (-2,-2)
 !        ----------------------------------------------------------------
 
-         if((prZ .lt. 0.0) .or. 
-     &      (prZ .gt. LayerHeight(LayerCount()))) then
+c         if((prZ .lt. 0.0) .or. 
+c     &      (prZ .gt. LayerHeight(LayerCount()))) then
+c               piCellID  = -2
+c               piLayerID = -2        
+c               return            
+c         endif
+c         if((rRadius .ge. RingRadius(RingCount())) .and.
+c     &      (rRadius .le. (RingRadius(RingCount()) + 
+c     &                     ReflectorThickness()))   ) then
+c            piCellID  = -1
+c            if((prZ .ge. 0.0) .and. 
+c     &         (prZ .le. LayerHeight(LayerCount()))) then
+c               piLayerID = -1
+c               return
+c            else
+c               piCellID  = -2
+c               piLayerID = -2        
+c               return
+c            endif
+c         elseif(rRadius .gt. (RingRadius(RingCount()) + 
+c     &          ReflectorThickness())) then
+c            piCellID  = -2
+c            piLayerID = -2  
+c            return
+c         endif
+         
+         if((prZ .lt. -BReflectorThickness()) .or. 
+     &      (prZ .gt. (LayerHeight(LayerCount()) + 
+     &                 TReflectorThickness()))) then
                piCellID  = -2
                piLayerID = -2        
                return            
@@ -160,13 +215,27 @@
      &      (rRadius .le. (RingRadius(RingCount()) + 
      &                     ReflectorThickness()))   ) then
             piCellID  = -1
-            if((prZ .ge. 0.0) .and. 
-     &         (prZ .le. LayerHeight(LayerCount()))) then
+            if((prZ .ge. -BReflectorThickness()) .and. 
+     &         (prZ .le. (LayerHeight(LayerCount()) + 
+     &                 TReflectorThickness()))) then
                piLayerID = -1
                return
             else
                piCellID  = -2
                piLayerID = -2        
+               return
+            endif
+         elseif(rRadius .lt. RingRadius(RingCount())) then
+            if((prZ .gt. LayerHeight(LayerCount())) .and.
+     &         (prZ .lt. (LayerHeight(LayerCount()) + 
+     &                    TReflectorThickness()      ))) then
+               piCellID  = -1
+               piLayerID = -1
+               return
+            elseif((prZ .gt. -BReflectorThickness()) .and.
+     &             (prZ .lt. 0.0)) then
+               piCellID  = -1
+               piLayerID = -1    
                return
             endif
          elseif(rRadius .gt. (RingRadius(RingCount()) + 
@@ -175,6 +244,8 @@
             piLayerID = -2  
             return
          endif
+
+  
 !        ----------------------------------------------------------------
 !        INDICATES THAT THE PARTICLE IS WITHIN THE REACTOR CORE STD CELL.
 !        ----------------------------------------------------------------         
@@ -239,7 +310,7 @@
          enddo
 2        continue
          i = 1
-         do i=1, 10, 1
+         do i=1, LAYER_COUNT, 1
             if(i .eq. 1) then
                if((prZ .le. LayerHeight(i)) .and. 
      &            (prZ .ge. 0.0)) then
@@ -790,7 +861,44 @@
          return
       end subroutine
 
+      real function CellVolume(piCellID, piLayerID)
+      
+         integer, intent(in) :: piCellID
+         integer, intent(in) :: piLayerID
+         real, parameter :: PI = 3.141592654
+         
+         integer :: iI, iK, iL
+         real    :: rRi, rRi1
+         real    :: rThk, rThk1
+         real    :: rHl, rHl1
+         
+         
+         call CellIndex(piCellID , iI, iK)
+         iL = piLayerID
+         
+         if((piCellID .eq. 1) .and. (piLayerID .eq. 1)) then
+         
+            rRi = RingRadius(1)
+            rHl = LayerHeight(1)
             
+            CellVolume = PI * rRi**2 * rHl
+            return
+            
+         elseif((piCellID .gt. 1) .and. (piCellID .lt. 128) .and.
+     &          (piLayerID .gt. 0) .and. 
+     &          (piLayerID .lt. LayerCount())) then
+         
+            rRi   = RingRadius(iI)
+            rRi1  = RingRadius(iI-1)
+            rThk  = ThetaFromIndex(iI, iK)
+            rThk1 = ThetaFromIndex(iI, iK-1)
+            rHl   = LayerHeight(iL)
+            rHl1  = LayerHeight(iL-1)
+            CellVolume = 0.5 * (rThk-rThk1) * (rHl-rHl1) *
+     &                  (rRi**2-rRi1**2)
+            return
+         endif
+      end function
       end module
       
       

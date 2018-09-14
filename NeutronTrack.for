@@ -1,7 +1,20 @@
-!
-!     Module NeutronTrack. Author M. R. Omar, October 2017. Revision 171101-1.
+!                                                                       
+!     Neutron Tracking Module, Revision 180915-1.
+!     Author M. R. Omar, October 2017. All copyrights reserved, 2017.
 !     (c) Universiti Sains Malaysia
-!     (c) Agensi Nuklear Malaysia
+!     (c) Malaysian Nuclear Agency
+!
+!     NOTICE:  All information contained herein is, and remains the pro-
+!     perty of the copyright owners  and  their suppliers,  if any.  The 
+!     intellectual and technical concepts contained herein are  proprie-
+!     tary to the copyright owners and their suppliers and are protected
+!     by  trade  secret  or  copyright  law.    Dissemination  of   this 
+!     source  code  or  reproduction  of  this  source  code is strictly
+!     forbidden  unless  prior written permission  is  obtained from the 
+!     owners.
+!
+!     This source code was created on 1/11/2017 11:15 PM by M. R. Omar.
+!     Last revision date 15/9/2018.
 !
 !     This module defines the necessary methods of basic neutron tracking  pur-
 !     pose. This includes the procedure on  choosing reaction  types,  changing 
@@ -20,13 +33,13 @@
          use CellGeometry
          use NeutronBankManager
          use TXSReader
+         use Tally
          
          implicit none
          
          ! CURRENT  NEUTRON ID  FOR  TRACKING  PURPOSE.   IF THE TRACK_ID VALUE
          ! CHANGED, ALL  METHODS IN THIS  MODULE  WILL REFER THE NEW VALUE.
          integer :: TRACK_NID
-         
       contains
          
 !        ----------------------------------------------------------------------
@@ -36,7 +49,7 @@
 !        ----------------------------------------------------------------------
          subroutine BeginTracking(piNID)
             integer, intent(in) :: piNID
-            
+            integer :: i
             if((piNID .gt. 0) .and. 
      &         (piNID .le. TotalNeutronCount())) then
                if(ISTAT(piNID, 1) .ne. N_WAIT) then
@@ -46,6 +59,7 @@
                   TRACK_NID = piNID
                endif
             endif
+
          end subroutine
          
 !        ----------------------------------------------------------------------
@@ -116,22 +130,41 @@
             
             ! WE OBTAIN THE CURRENT CELL ID  AND LAYER ID.  PLUS  WE OBTAIN THE 
             ! CURRENT NEUTRON ENERGY GROUP.
-            nGroup = C_GRP(TRACK_NID, 1)
+            nGroup = C_GRP(TRACK_NID, 1)    
             iCell  = C_CEL(TRACK_NID, 1)
             iLayer = C_CEL(TRACK_NID, 2)
-            
             rSigTot = 0.0
+            
             ! ADD THE ABSORPTION CROSS SECTION (COLUMN-2) THIS INCLUDES FISSION.
-            rSigTemp = TXS_TABLE(iLayer, iCell, nGroup, 2)
+            if((iCell .gt. TXS_CEL) .or. (iCell .lt. -1)) then
+               GetSigTot = 0.0
+               return
+            endif
+            if((iLayer .gt. TXS_LAY) .or. (iLayer .lt. -1)) then
+               GetSigTot = 0.0
+               return
+            endif
+            if((nGroup .gt. TXS_GRP) .or. (nGroup .lt. 1)) then
+               GetSigTot = 0.0
+               return
+            endif
+          
+
+               rSigTemp = TXS_TABLE(iLayer, iCell, nGroup, 2)
+
+
+ 
             if(rSigTemp .lt. 0) rSigTemp = 0.0
             rSigTot = rSigTot + rSigTemp
+ 
             ! ADD THE GROUP SCATTERING CROSS SECTIONS.
             do i=1, TXS_GRP, 1
                rSigTemp = TXS_TABLE(iLayer, iCell, nGroup, i+5)
-               if(rSigTemp .lt. 0) rSigTemp = 0.0
+               if(rSigTemp .lt. 0) rSigTemp = 0.0 
                rSigTot = rSigTot + rSigTemp
             enddo           
             GetSigTot = rSigTot
+  
             return
          end function
          
@@ -144,18 +177,25 @@
             real :: rSigAbs
             integer :: nGroup
             integer :: iCell, iLayer
-
+            
+            
             ! OBTAIN CURRENT NEUTRON ENERGY GROUP AND CURRENT REACTOR CORE CELL
             nGroup = C_GRP(TRACK_NID, 1)
             iCell  = C_CEL(TRACK_NID, 1)
             iLayer = C_CEL(TRACK_NID, 2)
+           
             
             ! IF THE NEUTRON IS CURRENTLY IN THE GRAPHITE REFLECTOR THEN SELECT 
             ! THE UNIQUE CELL ID FOR GRAPHITE REFLECTOR.
             if((iLayer .eq. -1) .and. (iCell .eq. -1)) then
                rSigAbs = TXS_TABLE(iLayer, REFLECTOR_CELLID, nGroup, 2)
             else
-               rSigAbs = TXS_TABLE(iLayer, iCell, nGroup, 2)            
+               if((iLayer .gt. 0) .and. (iCell .gt. 0)) then
+                  rSigAbs = TXS_TABLE(iLayer, iCell, nGroup, 2)
+               else
+                  rSigAbs = 0.0
+               endif
+                        
             endif
 
             ! IN CASE IF THE NEUTRON CROSS SECTION READ IS LESS THAN ZERO, WE
@@ -221,8 +261,12 @@
                rSigFis = TXS_TABLE(iLayer, REFLECTOR_CELLID,
      &                   iGroup, 3) / GetNuBar()
             else
-               rSigFis = TXS_TABLE(iLayer, iCell, iGroup, 3)
-     &                   / GetNuBar()          
+            
+
+                  rSigFis = TXS_TABLE(iLayer, iCell, iGroup, 3)
+     &                   / GetNuBar()                  
+
+       
             endif
 
             ! IN CASE IF OUR THE  DATA OBTAINED IS LESS THAN ZERO,  WE JUST SET
@@ -261,13 +305,17 @@
             ! CELLID. REFLECTOR_CELLID  IS DEFINED  IN THE  GEOMETRY MODULE, IT 
             ! STORES THE CELL ID OF THE GRAPHITE REFLECTOR.
             if((iLayer .eq. -1) .and. (iCell .eq. -1)) then
-  
+
                rSigSca = TXS_TABLE(iLayer, REFLECTOR_CELLID,
      &                   piIncomingGroup, piOutgoingGroup+5)
-            else
 
-               rSigSca = TXS_TABLE(iLayer, iCell,
-     &                   piIncomingGroup, piOutgoingGroup+5)
+            else
+               
+
+                  rSigSca = TXS_TABLE(iLayer, iCell,
+     &                   piIncomingGroup, piOutgoingGroup+5)               
+
+
      
             endif
 
@@ -319,12 +367,14 @@
                enddo
                
             else
-
-               do j=1, TXS_GRP, 1
-                  rSigSca = rSigSca + 
-     &                      TXS_TABLE(iLayer, iCell, iGroup, j+5)
-               enddo
                
+
+                  do j=1, TXS_GRP, 1
+                     rSigSca = rSigSca + 
+     &                      TXS_TABLE(iLayer, iCell, iGroup, j+5)  
+                  enddo           
+
+                     
             endif
 
             ! IN CASE IF THE NEUTRON CROSS SECTION READ  IS LESS  THAN ZERO, WE
@@ -421,7 +471,6 @@
             ! NUMBER, ε. 
             rEpsilon = Rnd(int(TRACK_NID,8))
             
-            
             ! OBTAIN THE  TOTAL  CROSS SECTION AND THE ABSORPTION CROSS SECTION
             ! FOR CURRENT REACTOR CORE CELL.
             rSigTot = GetSigTot()
@@ -430,7 +479,7 @@
             ! THEN WE PREPARE THE CUMMULATIVE DIST. FUNC., rP(i)             
             rP(1) = 0.0
             rP(2) = rSigAbs   / rSigTot + rP(1)   
-            rP(3) = (rSigTot - rSigAbs) / rSigTot + rP(2)
+            rP(3) = 1.0
             
             ! THEN BY  USING  THE  INVERSION METHOD,  WE SELECT  WHICH REACTION 
             ! REGIME  CORRESPONDS  TO  THE ε  VALUE.  IF rP(1) ≤ ε < rP(2) THEN
@@ -545,11 +594,15 @@
             
             ! IF CURRENT CELL IS  THE  REFLECTOR CELL, USE THE FORMULA GIVEN IN 
             ! DUDERSTAT & HAMILTON PAGE 134.
-            if((iCell .eq. -1) .and. (iLayer .eq. -1)) then
-               rMu = (1.0 + 12.0*rMu) /
-     &               sqrt(12.0**2 + 2.0*12.0*rMu + 1.0)
-            endif
+C            if((iCell .eq. -1) .and. (iLayer .eq. -1)) then
+C               rMu = (1.0 + 12.0*rMu) /
+C     &               sqrt(12.0**2 + 2.0*12.0*rMu + 1.0)
+C            endif
             
+c            if(TXS_CELLTYPE(iCell) .eq. '        LW') then
+c               rMu = (1.0 + 2.0*rMu) /
+c     &               sqrt(2.0**2 + 2.0*2.0*rMu + 1.0)            
+c            endif
             ! HERE WE GENERATE  A RANDOM ANGLE ϕ ∈ [0,2π) TO CHANGE THE NEUTRON
             ! OUTGOING ANGLE.
             rRandPhi = 2.0 * PI * Rnd(int(TRACK_NID,8))      
@@ -570,13 +623,13 @@
             ! ENABLE THIS CODE IF WE ASSUME THAT THE REACTOR CORE BOUNDARY IS 
             ! 100% REFLECTIVE. DISABLE THIS CODE SECTION IF WE WANT NATURAL
             ! REFLECTOR BEHAVIOUR INSTEAD.
-C            if((iCell .eq. -1) .and. (iLayer .eq. -1)) then
-C               rUNew = rU - 2.0*(rX*rU+rY*rV)*rX /
-C     &                 RingRadius(RingCount())**2
-C               rVNew = rU - 2.0*(rY*rV+rX*rU)*rY /
-C     &                 RingRadius(RingCount())**2
-C               rWNew = rW
-C            endif
+c            if((iCell .eq. -1) .and. (iLayer .eq. -1)) then
+c               rUNew = rU - 2.0*(rX*rU+rY*rV)*rX /
+c     &                 RingRadius(RingCount())**2
+c               rVNew = rU - 2.0*(rY*rV+rX*rU)*rY /
+c     &                 RingRadius(RingCount())**2
+c               rWNew = rW
+c            endif
 
             ! REQUEST THE NEUTRON BANK TO CHANGE THE NEUTRON DIRECTION.
             call SetNeutronDirection(TRACK_NID, rUNew, rVNew, rWNew,
@@ -679,6 +732,40 @@ C            endif
             return
          end subroutine
          
+         subroutine NonAnalogAbsorption()
+            real :: rSigTot, rSigAbs
+            real :: rWeight, rWeightNew
+            real :: rWeightCutOff  = 0.25
+            real :: rWeightSurvive = 1.0
+            integer :: iStatus
+            real :: rEpsilon
+            real :: rPKilled                 ! THE PROBABILITY OF GETTING KILL-
+                                             ! ED IF THE WEIGHT IS BELOW CUTOFF
+                                             
+                                             
+            rSigTot = GetSigTot()
+            rSigAbs = GetSigAbs()
+            rWeight = C_WGT(TRACK_NID, 1)
+            rWeightNew = (1.0 - rSigAbs / rSigTot) * rWeight
+            rPKilled = 1.0 - rWeight / rWeightSurvive
+            if(rWeight .lt. rWeightCutOff) then
+               rEpsilon = Rnd(int(TRACK_NID, 8))
+               if(rEpsilon .lt. rPKilled) then
+                  call KillNeutron(TRACK_NID, N_DEAD, iStatus)
+               elseif((rEpsilon .ge. rPKilled) .and. 
+     &                (rEpsilon .lt. 1.0)) then
+                  
+                  L_WGT(TRACK_NID, 1) = C_WGT(TRACK_NID, 1)
+                  C_WGT(TRACK_NID, 1) = rWeightSurvive
+               endif
+            else
+            
+               L_WGT(TRACK_NID, 1) = C_WGT(TRACK_NID, 1)
+               C_WGT(TRACK_NID, 1) = rWeightNew
+            endif
+            
+         end subroutine
+         
 !        ----------------------------------------------------------------------
 !        NOTE: THIS METHOD IS DEPRICATED BUT RETAINED FOR FUTURE REFERENCE.
 !        SEE THE NEW METHOD THAT HANDLES NEUTRON TRANSPORT,  KeffTransport() IN 
@@ -691,6 +778,7 @@ C            endif
             real :: rU, rV, rW
             
             integer :: iStatus
+            
             
             rDistCol = DistanceToNextCollision()
             rDistBoundary = DistanceToNearestBoundary()
@@ -721,7 +809,7 @@ C            endif
                rZ = rZ + rDistCol * rW
             endif
             call SetNeutronPosition(TRACK_NID, rX, rY, rZ, iStatus)
-            
+            ! call ScoreTrackLengthTally(TRACK_NID)
             return
          end subroutine
 

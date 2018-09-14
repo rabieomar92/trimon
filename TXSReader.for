@@ -1,17 +1,20 @@
+!                                                                       
+!     TXS Tape Reader, Revision 180915-1.
+!     Author M. R. Omar, October 2017. All copyrights reserved, 2017.
+!     (c) Universiti Sains Malaysia
+!     (c) Malaysian Nuclear Agency
 !
+!     NOTICE:  All information contained herein is, and remains the pro-
+!     perty of the copyright owners  and  their suppliers,  if any.  The 
+!     intellectual and technical concepts contained herein are  proprie-
+!     tary to the copyright owners and their suppliers and are protected
+!     by  trade  secret  or  copyright  law.    Dissemination  of   this 
+!     source  code  or  reproduction  of  this  source  code is strictly
+!     forbidden  unless  prior written permission  is  obtained from the 
+!     owners.
 !
-!     ████████╗██╗  ██╗███████╗██████╗ ███████╗ █████╗ ██████╗ ███████╗██████╗ 
-!     ╚══██╔══╝╚██╗██╔╝██╔════╝██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔════╝██╔══██╗
-!        ██║    ╚███╔╝ ███████╗██████╔╝█████╗  ███████║██║  ██║█████╗  ██████╔╝
-!        ██║    ██╔██╗ ╚════██║██╔══██╗██╔══╝  ██╔══██║██║  ██║██╔══╝  ██╔══██╗
-!        ██║   ██╔╝ ██╗███████║██║  ██║███████╗██║  ██║██████╔╝███████╗██║  ██║
-!        ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝
-!                                                                    
-!     MODULE TXSREADER
-!
-!     THIS LIBRARY WAS WRITTEN BY M. R. OMAR. OCTOBER 2017.
-!     WHEN I WROTE THIS CODE, ONLY GOD  AND  I UNDERSTOOD WHAT I WAS DOING. BUT
-!     NOW, ONLY GOD KNOWS... HOWEVER, I WROTE SOME NOTES ON THIS CODE:
+!     This source code was created on 1/11/2017 11:15 PM by M. R. Omar.
+!     Last revision date 15/9/2018.
 !
 !     THE PURPOSE OF THIS LIBRARY IS TO  ENABLE   PROGRAMMERS  TO  RETRIEVE  DATA
 !     FROM THE TRIGA CROSS SECTION TAPE (.TXS).  A  TXS TAPE  CONSISTS OF SEVERAL
@@ -137,18 +140,37 @@
          integer :: TXS_CEL
          integer :: TXS_LAY
          integer :: TXS_GRP
-         
          real, allocatable :: TXS_TABLE(:,:,:,:)
+         character(len=10), allocatable :: TXS_CELLTYPE(:)
       contains
       
       subroutine InitTXSReader(pNF)
          integer, intent(in) :: pNF
          integer :: iStatus
+         integer :: i, j, k, l
+
          call READ_HEADER_8(pNF, TXS_GRP, TXS_CEL, TXS_LAY, iStatus)
          if(iStatus .eq. 0) then
             allocate( TXS_TABLE(TXS_LAY, TXS_CEL,
-     &                          TXS_GRP, TXS_GRP+6) )            
+     &                          TXS_GRP, TXS_GRP+6) )  
+            allocate( TXS_CELLTYPE(TXS_CEL) )
+            
+            do i=1, TXS_CEL, 1
+               do j=1, TXS_LAY, 1
+                  do k=1, TXS_GRP, 1
+                     do l=1, TXS_GRP+6, 1
+                        TXS_TABLE(j, i,
+     &                          k, l) = 0.0
+                     enddo
+                  enddo
+               enddo
+            enddo
+         else
+            print*, ' Cannot read the provided TXS tape!'
+            stop
          endif
+         
+         
       end subroutine
       
       subroutine READ_HEADER_8(pNF, pnPrincipalGroup,
@@ -196,17 +218,21 @@
          ! Define parameter(s) here...
          integer, intent(in) :: pNF, pnLayer
          integer, intent(out) :: piStat
-         integer :: ios, nLayer, iLine, nPrincipalGroup, nPricipalCell,
+         integer :: ios, nLayer, iLine, nPrincipalGroup, nPrincipalCell,
      &              nTotalLayers
          character(len=80) :: cText
          character(len=10) :: cElem
          integer :: nOffset
 
-         call READ_HEADER_8(pNF, nPrincipalGroup, nPricipalCell,
-     &                      nTotalLayers, piStat)
-         if(piStat .lt. 0) return         
+!         call READ_HEADER_8(pNF, nPrincipalGroup, nPricipalCell,
+!     &                      nTotalLayers, piStat)
+!         if(piStat .lt. 0) return         
+         nPrincipalGroup = TXS_GRP
+         nPrincipalCell  = TXS_CEL
+         nTotalLayers    = TXS_LAY
          
-         nOffSet = (nPricipalCell + nPricipalCell * nPrincipalGroup * 2)
+         nOffSet = (nPrincipalCell + nPrincipalCell * 
+     &              nPrincipalGroup * 2)
      &             * (pnLayer - 1) + 1
      
          piStat = 0
@@ -247,10 +273,12 @@
 
       
       
-      subroutine SEARCH_CORE_CELL(pNF, pnLayer, pnCell, piStat)
+      subroutine SEARCH_CORE_CELL(pNF, pnLayer, pnCell, 
+     &                            pcCellType, piStat)
          ! Define parameter(s) here...
          integer, intent(in) :: pNF, pnLayer, pnCell
          integer, intent(out) :: piStat
+         character(len=10), intent(out) :: pcCellType
          integer :: ios, nCell, iLine
          character(len=80) :: cText
          character(len=10) :: cElem
@@ -284,6 +312,7 @@
 !           and set the search status (piStat) to current line number (iLine) to 
 !           denote a search success.
             read(cText(11:20),'(I10)') nCell
+            read(cText(31:40),'(A10)') pcCellType
             if(nCell .eq. pnCell) then
                piStat = iLine
                goto 90
@@ -310,94 +339,7 @@
          return
       end subroutine
 
-!     THIS METHOD IS DEPRICATED BECAUSE THE ALGORITHM FOR RETRIEVING DATA
-!     FROM THE MASTER TABLE IS SIGNIFICANTLY SLOW. WE KEEP THIS FOR FUTURE
-!     REFERENCE.    
-      subroutine GET_DATA_ELEM(pNF, piLayer, piCell, piGroup,
-     &                          piCol, prValue, piStat)
-     
-         implicit none
-         
-         ! Define parameter(s) here...
-         integer, intent(in) :: pNF, piLayer, piCell, piCol, piGroup
-         real   , intent(out) :: prValue
-         integer, intent(out) :: piStat
-         
-         integer :: nPrincipalGroup, nPricipalCell, nTotalLayers
-         integer :: iG
-         character(len=80) :: cTextR1, cTextR2
-         
-         piStat = 0
-         prValue = 0.0000000
-         
-         if( (piCol .lt. 1) .or. (piCol .gt. 10) ) then
-            piStat = -2
-            return
-         endif
-         
-         call READ_HEADER_8(pNF, nPrincipalGroup, nPricipalCell,
-     &                      nTotalLayers, piStat)
-         if(piStat .lt. 0) return
-         
-         call SEARCH_CORE_CELL(pNF, piLayer, piCell, piStat)
-         if(piStat .lt. 0) return
-         
-         do iG=1, nPrincipalGroup, 1
- 
-            if(iG .ne. piGroup) then
 
-               read(pNF,'(A80)')
-               read(pNF,'(A80)')
-               piStat = piStat + 2
-               
-            elseif(iG .eq. piGroup) then
-            
-               read(pNF,'(A80)') cTextR1
-               read(pNF,'(A80)') cTextR2
-               if(piCol .le. 8) piStat = piStat + 1
-               if(piCol .gt. 8) piStat = piStat + 2
-               
-               select case (piCol)
-                  case (1)
-                     read(cTextR1(1:10),'(F10.7)') prValue
-                     return
-                  case (2)
-                     read(cTextR1(11:20),'(F10.7)') prValue
-                     return                     
-                  case (3)
-                     read(cTextR1(21:30),'(F10.7)') prValue
-                     return                  
-                  case (4)
-                     read(cTextR1(31:40),'(F10.7)') prValue
-                     return                  
-                  case (5)
-                     read(cTextR1(41:50),'(F10.7)') prValue
-                     return                  
-                  case (6)
-                     read(cTextR1(51:60),'(F10.7)') prValue
-                     return                  
-                  case (7)
-                     read(cTextR1(61:70),'(F10.7)') prValue
-                     return                  
-                  case (8)
-                     read(cTextR1(71:80),'(F10.7)') prValue
-                     return                  
-                  case (9)
-                     read(cTextR2(1:10),'(F10.7)') prValue
-                     return                  
-                  case (10)
-                     read(cTextR2(11:20),'(F10.7)') prValue
-                     return                  
-                  case default
-                     piStat = -2
-                     return
-               end select
-            endif      
-         enddo
-
-         return
-      end subroutine
-      
 
 !     --------------------------------------------------------------
 !     SUBROUTINE TXSGETTABLE(pNF, piStat)
@@ -432,7 +374,7 @@
 !     COLUMN-(N-1) IS THE SCATTERING CROSS SECTION FROM (N -> IGROUP)
 !     COLUMN-N IS THE EDH FACTOR.
 !
-      subroutine TXSGETTABLE(pNF, piStat)
+      subroutine TXSGETTABLE_DEPRICATED(pNF, piStat)
      
          implicit none
          
@@ -500,7 +442,8 @@
          
 !        WE BEGIN INVOKE THE SEARCH_CORE_CELL METHOD TO  GET  THE  CORE 
 !        CELL.         
-         call SEARCH_CORE_CELL(pNF, iLay, iCel, piStat)
+         call SEARCH_CORE_CELL(pNF, iLay, iCel, 
+     &                         TXS_CELLTYPE(iCel), piStat)
          if(piStat .lt. 0) return
 
 !        FOR EACH GROUP DEFINED FOR THE CELL, WE READ ALL COLUMNS AND
@@ -800,7 +743,6 @@
              
             case(1)
                if( (caElem(1) .eq. ' 111111111') .and.
-     &             (caElem(4) .eq. '          ') .and.
      &             (caElem(5) .eq. '          ') .and.
      &             (caElem(6) .eq. '          ') .and.
      &             (caElem(7) .eq. '          ') .and.
@@ -939,6 +881,7 @@
             endif
             nFULL = int(floor(real(nPrincipalGroup+6)/8.0))
             iTYPE = - ((nPrincipalGroup+6) - nFULL * 8)
+            
          endif
          
          
@@ -1088,7 +1031,7 @@
 !                 RECORD, WHICH IS A PART OF THE ROW OF A NEUTRON CROSS SECTION TABLE 
 !                 THAT BELONGS TO THE LAST HEADER-1 READ. IF IT IS NOT A 8-COL DATA RECORD,
 !                 THEN THE TAPE IS NOT VALID.
-                  jLine = 0
+201               jLine = 0
 98                read(pNF, '(A80)', iostat=ieof, err=93) cText
                   if(ieof .ne. 0) then
                      if(plQuiet) goto 85
@@ -1102,19 +1045,30 @@
                      return
                   endif
                   iLine = iLine + 1
-                  jLine = jLine + 1
+200               jLine = jLine + 1
                   write(cLine,'(I10)') iLine
-                  if((jLine .le. nFULL) .and. 
-     &               (flIsValid(-8, cText) .eqv. .false.)) then
-                     if(plQuiet) goto 86
-                     print*, ' TAPE ERROR at line ', adjustl(cLine//'.')
-                     print*, ' --- Part ',
-     &               'of the tape is missing after a 8-column record.'
-                     print*, '     Layer ID: ', cLayerID
-                     print*, '     Cell    : ', cCellID
-86                   continue                     
-                     plFlag = .false.
-                     return
+                  if(jLine .le. nFULL) then
+
+                     if(flIsValid(-8, cText) .eqv. .false.) then
+                        if(plQuiet) goto 86
+                        print*, ' TAPE ERROR at line ',
+     &                      adjustl(cLine//'.')
+                        print*, ' --- Part ',
+     &     'of the tape is missing after a 8-column record.'
+                        print*, '     Layer ID: ', cLayerID
+                        print*, '     Cell    : ', cCellID
+86                      continue                     
+                        plFlag = .false.
+                        return
+                     else
+                        if(jLine .eq. nFULL) then
+                           goto 200
+                           
+                        else
+                           goto 98
+                        endif
+                     endif 
+                     
                   else
 !                    IF THE LINE AFTER THE HEADER-1 IS A 8-COL DATA, THEN WE PROCEED TO
 !                    READ THE NEXT LINE. THE NEXT LINE AFTER A 8-COL DATA MUST BE A 2-COL
@@ -1147,7 +1101,7 @@
                         if(iGrp .eq. nGroup) then
                            goto 97
                         endif
-                        goto 98
+                        goto 201
                      endif
                   endif
                endif
@@ -1157,6 +1111,118 @@
 95       continue
          plFlag = .false.
          return
+      end subroutine
+      
+!     THIS IS THE SUCCESSOR ROUTINE OF TXSGETTABLE_DEPRICATED. THIS ROUTINE 
+!     IS INCREDIBLY FAST WHEN READING THE TXS TABLE.
+      subroutine TXSGETTABLE(pNF, piStat)
+         implicit none
+         
+         ! Define parameter(s) here...
+         integer, intent(in) :: pNF
+         integer, intent(out) :: piStat
+         logical :: lTapeValid
+         integer :: nPrincipalGroup, nPricipalCell, nTotalLayers
+         integer :: iG, iLay, iCel, j
+         integer :: iLayT, iCelT
+         character(len=80) :: cText
+         character(len=10) :: iDummy
+         
+!        INITIALLY WE ASSUME THERE IS NO ERROR. WE SET piStat TO 0.
+         piStat = 0
+   
+!        BEFORE WE PROCEED READING THE TAPE,  WE VERIFY WHETHER THE TAPE
+!        IS VALID OR NOT. INVALID TAPE CAN CAUSE ERRORS WHEN READING THE
+!        CORRUPTED TAPE.
+         call TXSVALIDATE(pNF, lTapeValid, .true.)
+!         if(lTapeValid) print*, ' TAPE-READ: The tape is valid.'
+         if(lTapeValid .eqv. .false.) then
+            print*, ' TAPE-READ: The tape is not valid. Abort reading.'
+            piStat = -1
+            return
+         endif
+         
+!         print*, ' TAPE-READ: Loading data from the TXS tape.',
+!     &           ' Please wait.'
+
+!        NEXT WE READ THE TXS TAPE HEADER-8. HEADER-8 CONTAINS THE INFOR-
+!        MATION ABOUT THE TOTAL NUMBER OF NEUTRON GROUPS,  THE TOTAL NUM-
+!        BER OF CELLS AND THE TOTAL NUMBER OF REACTOR CORE LAYERS.
+!        EXAMPLE OF HEADER-8:
+!        888888888 888888888 888888888 888888888   NGROUP  NCELL  NLAYER
+         call READ_HEADER_8(pNF, nPrincipalGroup, nPricipalCell,
+     &                      nTotalLayers, piStat)
+         if(piStat .lt. 0) return
+         
+!        CHECK IF THE DIMENSION OF THE TABLE ARRAY SIZE PROVIDED BY  THE
+!        INVOKER. IF THE ARRAY SIZE IS SMALL, THEN STOP. TELL USER THERE
+!        IS INTERNAL ERROR. PROGRAMMERS MUST TAKE NOTE THAT THE SIZE  OF
+!        TXS_TABLE HAS TO BE (pnL,pnC,pnG,10). 
+
+         write(iDummy,'(I10)') nPrincipalGroup
+         print*, ' TAPE-READ: The PRINCIPAL neutron group count is ',
+     &       adjustl(iDummy//'.')
+         write(iDummy,'(I10)') nPricipalCell
+         print*, ' TAPE-READ: The PRINCIPAL cell count is ',
+     &       adjustl(iDummy//'.')
+         write(iDummy,'(I10)') nTotalLayers
+         print*, ' TAPE-READ: The PRINCIPAL layer count is ',
+     &       adjustl(iDummy//'.')
+
+         rewind pNF
+!        WE IMPLEMENT NESTED LOOPS HERE TO  ITERATE THROUGH EVERY SINGLE
+!        REACTOR CORE CELL AVAILABLE IN THE TAPE. THE ITERATIONS ARE LI-
+!        MITTED UP TO MAX NUMBER OF CORE LAYERS (nTotalLayers)  AND  MAX
+!        NUMBER OF CELLS - THE PRINCIPAL CELL COUNT (nPrincipalCell).
+         !$OMP PARALLEL DO
+         do iLay=1, nTotalLayers, 1
+         
+901         read(pNF,'(A80)') cText
+            if(flIsValid(0, cText)) then
+               read(cText(71:80),'(I10)') iLayT
+               if(iLay .eq. iLayT) then
+                  goto 902
+               else
+                  goto 901
+               endif
+            else
+               goto 901
+            endif
+
+
+902      continue
+
+         do iCel=1, nPricipalCell, 1
+         
+903         read(pNF,'(A80)') cText
+            if(flIsValid(1, cText)) then
+               read(cText(11:21),'(I10)') iCelT
+               if(iCel .eq. iCelT) then
+                  goto 904
+               else
+                  goto 903
+               endif
+            else
+               goto 903
+            endif            
+
+904      continue
+
+!        FOR EACH GROUP DEFINED FOR THE CELL, WE READ ALL COLUMNS AND
+!        ASSIGN THEM TO THE TABLE MATRIX.    
+         do iG=1, nPrincipalGroup, 1
+            read(pNF,'(8F10.7)') (TXS_TABLE(iLay, iCel, iG, j),
+     &                            j=1, nPrincipalGroup+6)
+         enddo
+         
+         enddo
+         enddo
+         !$OMP END PARALLEL DO
+         print*, ' TAPE-READ: Finish reading neutron ',
+     &           'cross section tape.'
+         return
+         
+         
       end subroutine
       
       

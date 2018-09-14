@@ -1,8 +1,20 @@
-!     
-!     Module RandomNumberGenerator. Author M. R. Omar, October 2017. Revision
-!     171102-1.
+!                                                                       
+!     Random Number Generator, Revision 180915-1.
+!     Author M. R. Omar, October 2017. All copyrights reserved, 2017.
 !     (c) Universiti Sains Malaysia
-!     (c) Agensi Nuklear Malaysia
+!     (c) Malaysian Nuclear Agency
+!
+!     NOTICE:  All information contained herein is, and remains the pro-
+!     perty of the copyright owners  and  their suppliers,  if any.  The 
+!     intellectual and technical concepts contained herein are  proprie-
+!     tary to the copyright owners and their suppliers and are protected
+!     by  trade  secret  or  copyright  law.    Dissemination  of   this 
+!     source  code  or  reproduction  of  this  source  code is strictly
+!     forbidden  unless  prior written permission  is  obtained from the 
+!     owners.
+!
+!     This source code was created on 1/11/2017 11:15 PM by M. R. Omar.
+!     Last revision date 15/9/2018.
 !
 !
 !     Methods:
@@ -35,7 +47,7 @@
          implicit none
 
 !        NUMBER OF PARTICLE HISTORY CHANNELS.
-         integer(8) :: N_HIST = 999999_8
+         integer(8) :: N_HIST = 99999999_8
 !        STRIDE LENGTH
          integer(8), parameter :: N_STR = 152917_8
 !        RANDOM NUMBER SEQUENCE ARRAY. 
