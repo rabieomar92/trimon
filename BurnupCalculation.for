@@ -17,7 +17,7 @@
 !     Last revision date 15/9/2018.
 !
       
-      subroutine BurnupCalculation()
+      subroutine BurnupCalculation(pcRunID)
       
          integer, parameter :: NFO = 68
          integer, parameter :: NFI = 69
@@ -25,8 +25,8 @@
          integer, parameter :: NFPPE = 71
          integer, parameter :: NFPPB = 72
          integer, parameter :: NFPPC = 73
+         character(len=30), intent(in) :: pcRunID
          
-  
          integer :: iaNBeta(3), i, j, k, iRing, iFlag, iCellID, n1
          integer :: iEl
          real    :: rBurnupIncrement, rPowerPerElement
@@ -55,8 +55,8 @@
          open(unit=NFO, file="FUEL_INVENTORY.OUT",
      &        status='UNKNOWN', err=103)
      
-
-
+         write(NFPPC,'(2A)') 'Run ID: ', trim(pcRunID)
+         write(NFO,'(2A)')   'Run ID: ', trim(pcRunID)
 !     FIRST WE READ BETA PARAMETERS.
          call rasearch(NFI,0,'#BURNUP', 7, cTextTrv, iStatus)
          if (iStatus .gt. 0) goto 94
@@ -193,6 +193,8 @@
 
 !     NEXT WE READ THE POWER DISTRIBUTION FILE (PDIST.OUT) AND STORE
 !     DATA IN raCellPower.
+         ! READ TO SKIP RUN-ID LINE
+         read(NFPPB,*,end=134)
          do iCell=1, 6400, 1
             read(NFPPB,*,end=134) cCellID, raCellPower(iCell),
      &                            raCellPowerErr(iCell)
@@ -346,7 +348,6 @@
          character(len=4) :: cSiteRead
          real :: rErrorRead
          prValue = 0.0
-         
 1        continue
          read(pNFPPE,*,end=999,err=1)
      &      cSiteRead, prValue, rErrorRead

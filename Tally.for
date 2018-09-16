@@ -242,7 +242,7 @@
          end subroutine
          
          
-         subroutine WriteFluxToFile()
+         subroutine WriteFluxToFile(pcRunID)
             
          
             integer, parameter :: NFO = 36
@@ -250,12 +250,14 @@
             integer :: i, iLayer, iGroup, iCell
             character(len=4) :: cSite
             character(len=2) :: cGrp
+            character(len=30), intent(in) :: pcRunID
             open(unit=NFO, file=cFileName, status='UNKNOWN', err=99)
             goto 100
 99          print*, ' Error: Could not write flux data file.'
             return
 100         continue
 
+            write(NFO,'(2A)') 'Run ID: ', trim(pcRunID)
             do iCell=1, TXS_CEL-1, 1
             do iLayer=1, TXS_LAY, 1
                call CellSite(iCell , cSite)
@@ -272,7 +274,7 @@
             print*, ' TRIMON: Finished writing flux to FLUX.OUT.'
          end subroutine
          
-         subroutine WritePowerDistToFile(prNominalPower)
+         subroutine WritePowerDistToFile(prNominalPower,pcRunID)
             
             real, intent(in) :: prNominalPower
             integer, parameter :: NFO = 39
@@ -284,7 +286,9 @@
             integer :: i, iLayer, iGroup, iCell
             character(len=4) :: cSite
             character(len=2) :: cGrp
+            character(len=30), intent(in) :: pcRunID
             open(unit=NFO, file=cFileName, status='UNKNOWN', err=99)
+            write(NFO,'(2A)') 'Run ID: ', trim(pcRunID)
             goto 100
 99          print*, ' Warning: Could not write power',
      &              ' distribution data file.'
@@ -309,7 +313,7 @@
             
             rNormFactor = prNominalPower / rFCore
             
-            
+
             do iCell=1, TXS_CEL-1, 1
             do iLayer=1, TXS_LAY, 1
             
@@ -345,8 +349,9 @@
      &              ' distribution to PDIST.OUT.'
          end subroutine
          
-         subroutine WritePowerToFile(prNominalPower)
+         subroutine WritePowerToFile(prNominalPower,pcRunID)
             real, intent(in) :: prNominalPower
+            character(len=30), intent(in) :: pcRunID
             ! Define parameter(s) here...
             integer, parameter :: NFP = 13
             character(len=30)  :: cFileName = 'PPE.OUT'
@@ -359,7 +364,8 @@
             real :: rFCore      = 0.0
             real :: rNormFactor = 0.0
             open(unit=NFP, file=cFileName, status='UNKNOWN', err=99)
-            
+
+            write(NFP,'(2A)') 'Run ID: ', trim(pcRunID)          
             do iCell=1, TXS_CEL, 1
             do iLayer=1, TXS_LAY, 1
             do iGroup=1, TXS_GRP, 1

@@ -31,6 +31,7 @@
          
          implicit none 
          
+         
          ! KEFF_GUESS STORES THE INITIAL GUESS OF K-EFF.
          real :: KEFF_GUESS = 1.0
          real :: NOMINAL_POWER = 1000.0
@@ -61,14 +62,14 @@
 !        THE FISSION SITE DISTRIBUTION ψ(n).
 !        ----------------------------------------------------------------------
          subroutine CalculateKeff(pnHistories, pnCycles, pnSkip,
-     &                            prKeffGuess)
+     &                            prKeffGuess,pcRunID)
          
             ! ROUTINE INPUT PARAMETERS
             integer, intent(in) :: pnHistories    ! NO. OF HISTORIES PER CYCLE.
             integer, intent(in) :: pnCycles       ! NO. OF  CALCULATION CYCLES.
             integer, intent(in) :: pnSkip         ! CALCULATION SKIP COUNT.
             real   , intent(in) :: prKeffGuess    ! INITIAL GUESS OF K-EFF
-            
+            character(len=30), intent(in) :: pcRunID            
             ! PRIVATE VARIABLES
             integer :: iNID
             integer :: iCycle
@@ -76,24 +77,49 @@
             real    :: rKeffAvg             ! A MOVING AVERAGE VALUE  OF K-EFF.
             real    :: rKeffSqAvg           ! A MOVING AVERAGE VALUE OF K-EFF^2
             real    :: rKeffError           ! STANDARD ERROR OF K-EFF.
-            real    :: rKeffColEst
-            real    :: N_TOTCOLPREV
             integer :: i, j, k, nTotCycles          ! MULTI-PURPOSE INTEGER VAR.
             integer :: NFO = 24
             integer :: NFT = 26
             character(len=40) :: cNumText
             real    :: rCPUStart, rCPUFinish
-            integer :: iCPUMinutes, iCPUSeconds
+            integer :: iCPUMinutes, iCPUSeconds, iCPUMinTot, iCPUSecTot
             real    :: rX, rX2, rxBar, rx2Bar, rSBar, rRErr, rFOM
             real    :: rCurrentError
+            character(len=80) :: caKeffLine(1000000)
+
             ! SETTING  THE  AVERAGE VALUES  TO ZERO BEFORE BEGIN KEFF AVERAGING. 
             ! CALCULATION.
             rKeffAvg   = 0.0
             rKeffSqAvg = 0.0
-            N_TOTCOLPREV = 0.0
             TOTAL_CYCLE = pnCycles
+            iCPUMinTot = 0
+            iCPUSecTot = 0
             ! OPEN FILE FOR WRITING THE K-EFF VALUE FOR ALL CYCLES.
             open(unit=NFO,file='KEFF.OUT',status='unknown')
+            write(NFO,'(2A)') '  EFFECTIVE MULTIPLICATION ',
+     &                       'FACTOR CALCULATION RESULT'
+            write(NFO,'(2A)') '  =========================',
+     &                       '========================='
+            write(NFO, '(6A)')  '  Run ID                        = ',
+     &          pcRunID
+            write(NFO,'(A,I0)') '  Total number of cycles        = ',
+     &          pnCycles
+            write(NFO,'(A,I0)') '  Total number of active cycles = ',
+     &          pnCycles-pnSkip
+            write(NFO,'(A,I0)') '  Total number of histories     = ',
+     &          pnHistories
+            write(NFO,'(A,I0)') '  Total number of energy groups = ',
+     &          TXS_GRP
+            write(NFO,'(A,I0)') '  Number of cells per layer     = ',
+     &          TXS_CEL
+            write(NFO,'(A,I0)') '  Number of layers              = ',
+     &          TXS_LAY
+     
+            write(NFO,'(A)') ''
+            write(NFO,'(A,58A1)') '  ', ('-',i=1,58)
+            write(NFO,'(A10,2X,A10,2X,2A10,A13)') 'CYCLE',
+     &         'K-EFF', ' AVG K-EFF', 'H-SRC', 'CPU TIME'
+            write(NFO,'(A,58A1)') '  ', ('-',i=1,58)
             ! OPEN FILE FOR WRITING NEUTRON TRACKS OF THE FIRST 1000 HISTORIES.
             open(unit=NFT,file='TRACK.OUT',status='unknown')
             ! SETTING THE INITIAL GUESS OF K-EFF.
@@ -115,7 +141,7 @@
             write(*,'(I10,2X,F10.5,2X,A10,A10,F10.3)') 
      &            0, KEFF_GUESS, 'SKIP', 'GUESS', -1.0
      &            * log(1.0/real(TXS_LAY*TXS_CEL))/log(2.0)
-            write(NFO,'(I10,2X,F15.5,2X,F15.5,2X,F15.5)') 0, KEFF_GUESS,
+            write(NFO,'(I10,2X,F10.5,2X,F10.5,2X,F10.5)') 0, KEFF_GUESS,
      &            0.0, -1.0
      &            * log(1.0/real(TXS_LAY*TXS_CEL))/log(2.0)
             ! BEGIN THE CYCLE LOOP, THE NUMBER OF CYCLES IS pnCycles.
@@ -218,7 +244,8 @@
             ! NOW CALCULATE THE CPU LEAD TIME FOR CURRENT FISSION CYCLE
             iCPUMinutes = int(floor((rCPUFinish-rCPUStart)/60.0))
             iCPUSeconds = int(rCPUFinish-rCPUStart)-60*iCPUMinutes
-            
+            iCPUMinTot = iCPUMinTot + iCPUMinutes
+            iCPUSecTot = iCPUSecTot + iCPUSeconds
 
             
             ! IF CURRENT CYCLE IS LESS THAN SKIP COUNT,  WE IGNORE PRINTING THE 
@@ -227,15 +254,18 @@
                write(*,'(I10,2X,F10.5,2X,2A10,F10.3,2X,I6,A2,I2,A1)') 
      &             iCycle, rKeff, 'SKIP', 'INACTIVE',
      &             ShannonEntropy(), iCPUMinutes, 'm ', iCPUSeconds, 's'
-               write(NFO,'(I10,2X,F15.5,2X,F15.5,2X,F15.5)') 
+               write(NFO,
+     &         '(I10,2X,F10.5,2X,F10.5,2X,F10.5,I6,A2,I2,A1)') 
      &             iCycle, rKeff, 0.0,
-     &             ShannonEntropy()
+     &             ShannonEntropy(), iCPUMinutes, 'm ', iCPUSeconds, 's'
             else
             write(*,'(I10,2X,F10.5,2X,F10.5,A10,F10.3,2X,I6,A2,I2,A1)')
      &             iCycle, rKeff, rKeffAvg , 'ACTIVE',
      &             ShannonEntropy(), iCPUMinutes, 'm ', iCPUSeconds, 's'
-               write(NFO,'(I10,2X,F15.5,2X,F15.5,2X,F15.5)') iCycle, 
-     &            rKeff, rKeffAvg, ShannonEntropy()
+               write(NFO,
+     &         '(I10,2X,F10.5,2X,F10.5,2X,F10.5,I6,A2,I2,A1)') 
+     &            iCycle, rKeff, rKeffAvg, ShannonEntropy(), 
+     &            iCPUMinutes, 'm ', iCPUSeconds, 's'
             endif
             ! NOW WE SET FISSION NEUTRONS AT THE COLLISION SITES AS THE NEUTRON
             ! SOURCE OF THE NEXT CRITICALITY CALCULATION CYCLE.
@@ -253,21 +283,65 @@
             ! END OF CYCLE LOOP
             enddo
             
-            ! CLOSE NEUTRON TRACK FILE AND KEFF FILE.
-            close(unit=NFT)
-            close(unit=NFO)
+
             
-            write(*,'(A,73A1)') '  ', ('-',i=1,73)
+            write(*,'(A,67A1)') '  ', ('-',i=1,67)
             print*
             ! WE PRINT THE AVERAGE VALUE OF K-EFF WITH ITS ERROR.
             rKeffError = sqrt((rKeffSqAvg - rKeffAvg**2) / 
      &               real(iCycle-pnSkip-1))
             write(*,'(A,F7.5,A,F7.5,A)') '  Estimated k-eff : (', 
      &         rKeffAvg, ' +/- ', rKeffError, ')'
-     
-            call WriteFluxToFile()
-            call WritePowerToFile(NOMINAL_POWER)
-            call WritePowerDistToFile(NOMINAL_POWER)
+
+            write(NFO,'(A,58A1)') '  ', ('-',i=1,58)
+            
+            rewind NFO
+            
+            i = 0
+            do 
+               i = i + 1
+               read(NFO,'(A80)',end=298) caKeffLine(i)
+            enddo
+298         continue
+
+            rewind NFO
+            
+            do j=1, i-1, 1
+               write(NFO,'(A80)') caKeffLine(j)
+               if(j .eq. 10) then
+                  write(NFO,'(A,F7.5,A,F7.5,A)') 
+     &               '  Estimated k-eff : (', 
+     &               rKeffAvg, ' +/- ', rKeffError, ')'
+                  if(iCPUSecTot .gt. 60) then
+                     iCPUMinTot = iCPUMinTot + 
+     &                 int(floor(real(iCPUSecTot)/60.0))
+                     iCPUSecTot = iCPUSecTot - 
+     &                 int(floor(real(iCPUSecTot)/60.0))
+                     write(NFO,'(A,I0,A,I0,A)')     
+     &                   '  Elapse time     : ',
+     &                   iCPUMinTot, 'm ', iCPUSecTot, 's'     
+                  else
+                     write(NFO,'(A,I0,A,I0,A)')     
+     &                   '  Elapse time     : ',
+     &                   iCPUMinTot, 'm ', iCPUSecTot, 's'     
+                  endif
+                  write(NFO,'(A,G0.3,A)') 
+     &                   '  Processing rate : ',
+     &              real(pnHistories)/(iCPUMinTot*60.0 +
+     &              iCPUSecTot*1.0), ' neutrons/s'
+               endif
+            enddo
+            
+
+               
+ 
+            ! CLOSE NEUTRON TRACK FILE AND KEFF FILE.
+            close(unit=NFT)
+            close(unit=NFO)
+            
+            call WriteFluxToFile(pcRunID)
+            call WritePowerToFile(NOMINAL_POWER,pcRunID)
+            call WritePowerDistToFile(NOMINAL_POWER,pcRunID)
             return
            
          end subroutine

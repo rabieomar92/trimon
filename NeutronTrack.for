@@ -289,7 +289,11 @@
             real    :: rSigSca
             integer :: nGroup
             integer :: iCell, iLayer
-
+            
+            if(piIncomingGroup .gt. TXS_GRP) then
+               GetSigSca = 0.0
+               return
+            endif
             ! OBTAIN THE CURRENT NEUTRON ENERGY GROUP, AND CELL INDICES.
             nGroup = C_GRP(TRACK_NID, 1)
             iCell  = C_CEL(TRACK_NID, 1)
@@ -339,11 +343,16 @@
             integer :: iCell, iLayer
             integer :: j
             
+
             ! OBTAIN THE CURRENT NEUTRON ENERGY GROUP, AND CELL INDICES.
             iGroup = C_GRP(TRACK_NID, 1)
             iCell  = C_CEL(TRACK_NID, 1)
             iLayer = C_CEL(TRACK_NID, 2)
-            
+
+            if(iGroup .gt. TXS_GRP) then
+               GetSigTotSca = 0.0
+               return
+            endif            
             ! SINCE THE SCATTERING CROSS SECTION OF THE FIRST GROUP  IS LOCATED 
             ! AT THE 6-TH COLUMN,  WE HAVE TO OFFSET THE  COLUMN  TO j+5.  THIS
             ! TIME WE HAVE TO SUM ALL OF THE INDIVIDUAL GROUP SCATTERING  CROSS

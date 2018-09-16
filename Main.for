@@ -29,15 +29,23 @@
 !        Begin your code here...
          integer :: iStatus, i
          integer :: iTXSUnit = 20
-         real :: rStart, rFinish
-         integer :: iSeed, nHistories, nCycle, nSkip, nRing
+         integer :: iSeed, nHistories, nCycle, nSkip, nRing  
+         integer :: NFI = 12    
+         integer :: tCol, tC, tL, tG 
+         real    :: rStart, rFinish
          real    :: keffGuess
-         integer :: NFI = 12
+         real    :: tX, tY, tZ
          character(len=80) :: cTextTrv
          character(len=80) :: cTXSFileName
          logical :: lFlag
-         integer :: tCol, tC, tL, tG
-         real    :: tX, tY, tZ
+         character(len=30) :: cRunID
+         character(len=30) :: tDate, tTime
+         ! HERE WE GENERATE RUN ID FOR SIMULATION IDENTIFICATION PURPOSE
+         call date_and_time(DATE=tDate,TIME=tTime)       
+         cRunID = trim(tDate)//'-'// tTime(1:6)// '-'// tTime(8:10) 
+         print*, ' TRIMON Version 1.180916.175015 Build 132'
+         print* 
+            
          if(iargc() .eq. 1) then
             call getarg(1, cTXSFileName)
             if(cTXSFileName .eq. '-update-burnup') then
@@ -76,8 +84,6 @@
          read(NFI,*,end=93,err=93) (RING_RADIUS(i),i=1,RING_COUNT) 
          read(NFI,*,end=93,err=93) FUEL_LENGTH
          read(NFI,*,end=93,err=93) REFLECTOR_THICKNESS
-c         read(NFI,*,err=93) TOPREFLECTOR_THICKNESS
-c         read(NFI,*,err=93) BOTREFLECTOR_THICKNESS
 
          call rasearch(NFI,0,'#POWER', 6, cTextTrv, iStatus)
          if (iStatus .gt. 0) goto 92
@@ -91,10 +97,6 @@ c         read(NFI,*,err=93) BOTREFLECTOR_THICKNESS
          call InitTally()
          print*, 'Done.'
          call TXSGetTable(iTXSUnit, istatus)
-         
-       
-         
-         print'(A,I0)', '  Number of cells: ', TXS_CEL*TXS_LAY
          print'(A,$)', '  HGMC: Initializing fission bank.'
          call InitNeutronBank()
          print*, 'Done.'
@@ -102,8 +104,9 @@ c         read(NFI,*,err=93) BOTREFLECTOR_THICKNESS
          call InitRnd(10000000_8,500000_8,int(iSeed,8))
          print*, 'Done.'
          call cpu_time(rStart)    
-         call CalculateKeff(nHistories,nCycle, nSkip, keffGuess)
-         call BurnupCalculation()
+         call CalculateKeff(nHistories,nCycle, nSkip, keffGuess,
+     &      cRunID)
+         call BurnupCalculation(cRunID)
          call cpu_time(rFinish)
          print'("  HGMC: Total CPU time ",G0.3," sec(s).")',
      &       (rFinish - rStart)
