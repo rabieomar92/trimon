@@ -1,0 +1,72 @@
+@echo off
+rem     ------------------------------------------------------------------------------
+rem     This compilation script has been created by Fortran-It! (c) M. R. Omar, 2017.
+rem     ------------------------------------------------------------------------------
+
+    if not exist @OutputPath (  
+        mkdir @OutputPath
+    )   
+    PATH = @BinPath;@Path
+    set LIBRARY_PATH = @LibraryPath
+
+    if @CompilerName == "gfortran" (
+
+        if @ProgramName == "WITRIG" (
+            del @SourcePath\witri*.o
+            @CompilerName -static -c @MainSource @SourceLinks -fno-range-check -static-libgcc
+            move witri*.o @SourcePath    
+        )
+        if @ProgramName == "TRSTART" (
+            del @SourcePath\trstart*.o
+            @CompilerName -static -c @MainSource @SourceLinks -fno-range-check -static-libgcc
+            move trstart*.o @SourcePath
+        )
+        if @ProgramName == "LOOXSB" (
+            del @SourcePath\looxsb*.o
+            @CompilerName -static -c @MainSource @SourceLinks -fno-range-check -static-libgcc
+            move looxsb*.o @SourcePath
+        )
+        if @ProgramName == "XSWOUT" (
+            del @SourcePath\xswout*.o
+            @CompilerName  -static -std=legacy -c @SourceLinks -fno-range-check -static-libgcc
+            move xswout*.o @SourcePath
+        )
+        if @ProgramName == "TXSJOINER" (
+            del @SourcePath\txsjoiner.o
+            @CompilerName  -static -c @MainSource -fno-range-check -static-libgcc
+            move txsjoiner.o @SourcePath
+        )
+        if @ProgramName == "WITCH" (
+            @CompilerName -static -o @OutputPath\@ProgramName @MainSource @SourcePath\*.o -fno-range-check -static-libgcc
+           copy @OutputPath\@ProgramName.exe B:\OneDrive\Code
+        )
+        
+        if @ProgramName == "CELLMAP" (
+            @CompilerName -static -o @OutputPath\@ProgramName @MainSource @SourceLinks @Modules -fno-range-check -static-libgcc
+           copy @OutputPath\@ProgramName.exe B:\OneDrive\Code            
+        )
+        if @ProgramName == "RANDOM" (
+            @CompilerName -static -o @OutputPath\@ProgramName @MainSource @SourceLinks @Modules -fno-range-check -static-libgcc
+           copy @OutputPath\@ProgramName.exe B:\OneDrive\Code            
+        )
+        if @ProgramName == "HGMC" (
+            @CompilerName -g -static -o @OutputPath\@ProgramName @MainSource @SourceLinks @Modules -fno-range-check -static-libgcc
+           copy @OutputPath\@ProgramName.exe B:\OneDrive\Code            
+        )
+        if @ProgramName == "TXSREAD" (
+            @CompilerName -g -static -o @OutputPath\@ProgramName @MainSource @SourceLinks @Modules -fno-range-check -static-libgcc
+           copy @OutputPath\@ProgramName.exe B:\OneDrive\Code            
+        )        
+        if @ProgramName == "LIBREADER" (
+            @CompilerName -g -static -o @OutputPath\@ProgramName @MainSource @SourceLinks @Modules -fno-range-check -static-libgcc
+           copy @OutputPath\@ProgramName.exe B:\OneDrive\Code            
+        ) 
+        if @ProgramName == "FUELINVENTORYMAKER" (
+            @CompilerName -g -static -o @OutputPath\@ProgramName @MainSource @SourceLinks @Modules -fno-range-check -static-libgcc
+           copy @OutputPath\@ProgramName.exe B:\OneDrive\Code            
+        ) 
+    )
+
+    if @CompilerName == "g77" (
+        @CompilerName -o @OutputPath\@ProgramName @MainSource @SourceLinks @Settings
+    )
