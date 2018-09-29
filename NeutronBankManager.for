@@ -272,10 +272,11 @@
                return
             endif
             
-            call GetTargetCell(prX, prY, prZ,
-     &                         prU, prV, prW,
-     &                         iCell, iLayer)
-     
+c            call GetTargetCell(prX, prY, prZ,
+c     &                         prU, prV, prW,
+c     &                         iCell, iLayer)
+            call GetCurrentCell(prX, prY, prZ,
+     &                         iCell, iLayer)     
             N_KEFFSRC = N_KEFFSRC + 1
             
             FC_DIR(N_KEFFSRC, 1) = prU

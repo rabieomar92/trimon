@@ -108,9 +108,9 @@
             
             ! HERE  WE  CORRECT  FLOATING  POINT  ISSUES  THAT  CAUSES  NEUTRON 
             ! BOUNDARY  TRAP.   
-            if(rDistance .lt. 1E-05) then
-               rDistance = rDistance + 1E-05
-            endif
+            if(rDistance .lt. 1E-5) then
+               rDistance = rDistance + 1E-3
+            endif  !0.00001
             
             DistanceToNearestBoundary = rDistance
             

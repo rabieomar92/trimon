@@ -116,12 +116,12 @@
      &          TXS_LAY
      
             write(NFO,'(A)') ''
-            write(NFO,'(A,58A1)') '  ', ('-',i=1,58)
-            write(NFO,'(A10,2X,A10,2X,2A10,A13)') 'CYCLE',
-     &         'K-EFF', ' AVG K-EFF', 'H-SRC', 'CPU TIME'
-            write(NFO,'(A,58A1)') '  ', ('-',i=1,58)
+            write(NFO,'(A,68A1)') '  ', ('-',i=1,68)
+            write(NFO,'(A10,2X,A10,2X,A10,2X,A10,2X,A13)') 'CYCLE',
+     &         'K-EFF', ' AVG K-EFF', 'STDEV', 'H-SRC', 'CPU TIME'
+            write(NFO,'(A,68A1)') '  ', ('-',i=1,68)
             ! OPEN FILE FOR WRITING NEUTRON TRACKS OF THE FIRST 1000 HISTORIES.
-            open(unit=NFT,file='TRACK.OUT',status='unknown')
+c            open(unit=NFT,file='TRACK.OUT',status='unknown')
             ! SETTING THE INITIAL GUESS OF K-EFF.
             KEFF_GUESS = prKeffGuess
             rKeff = KEFF_GUESS
@@ -134,15 +134,16 @@
             ! PRINTING K-EFF TABLE HEADER.
             print*
             write(*,'(A,67A1)') '  ', ('-',i=1,67)
-            write(*,'(A10,2X,A10,2X,3A10,A13)') 'CYCLE',
-     &         'K-EFF', ' AVG K-EFF', 'TALLY', 'H-SRC', 'CPU TIME'
+            write(*,'(A10,2X,A10,2X,A10,2X,2A10,A13)') 'CYCLE',
+     &         'K-EFF', ' AVG K-EFF', 'STDEV', 'H-SRC', 'CPU TIME'
             write(*,'(A,67A1)') '  ', ('-',i=1,67)
             ! PRINT THE INITIAL GUESS OF K-EFF (CYCLE-0)
-            write(*,'(I10,2X,F10.5,2X,A10,A10,F10.3)') 
+            write(*,'(I10,2X,F10.5,2X,A10,2X,A10,F10.3)') 
      &            0, KEFF_GUESS, 'SKIP', 'GUESS', -1.0
      &            * log(1.0/real(TXS_LAY*TXS_CEL))/log(2.0)
-            write(NFO,'(I10,2X,F10.5,2X,F10.5,2X,F10.5)') 0, KEFF_GUESS,
-     &            0.0, -1.0
+            write(NFO,'(I10,2X,F10.5,2X,F10.5,2X,A10,F10.5)')
+     &             0, KEFF_GUESS,
+     &            0.0, 0.0, -1.0
      &            * log(1.0/real(TXS_LAY*TXS_CEL))/log(2.0)
             ! BEGIN THE CYCLE LOOP, THE NUMBER OF CYCLES IS pnCycles.
             do iCycle=1, nTotCycles, 1     
@@ -173,10 +174,11 @@
                call BeginTracking(iNID)
                
                ! SHOW USERS CURRENT (NEUTRON-ID)-OF-(NUMBER OF HISTORIES).
-               if(mod(iNID,100) .eq. 0) then
-                  write(*,'(A,I0,A,I0,A,I0,A)',advance='no') 
-     &            '  Simulating neutron ', iNID, ' of ', 
-     &             N_KEFFHIS, '. [', 100*iNID/N_KEFFHIS, '%]'//char(13)
+               if(mod(iNID,1000) .eq. 0) then
+                  write(*,'(A,I0,A,I0,A)',advance='no') '  ',
+     &            iNID/1000, 'k/',N_KEFFHIS/1000,
+     &            'k neutrons simulated.' // char(13)
+!     &            '. [', 100*iNID/N_KEFFHIS, '%]'//char(13)
                endif
                ! BEGIN NEUTRON  HISTORY  SIMULATION UNTIL IT IS DEAD OR ESCAPED.
                ! IF THE NEUTRON IS STILL ALIVE AND INSIDE THE REACTOR, ITS ISTAT
@@ -190,12 +192,12 @@
                   ! HERE WE USED A SPECIAL TRANSPORT CODE DESIGNED FOR KEFF CALCU
                   ! LATION. PROCEED TO KeffTransport() SUBROUTINE FOR MORE INFO.
                   call KeffTransport()
-                  if(iCycle .eq. pnCycles) then
-                     if(iNID .le. 1000) then
-                        write(NFT, '(I10,3F20.3)') iNID, C_POS(iNID,1),
-     &                     C_POS(iNID,2), C_POS(iNID,3)
-                     endif
-                  endif
+c                  if(iCycle .eq. pnCycles) then
+c                     if(iNID .le. 1000) then
+c                        write(NFT, '(I10,3F20.3)') iNID, C_POS(iNID,1),
+c     &                     C_POS(iNID,2), C_POS(iNID,3)
+c                     endif
+c                  endif
                   
                enddo
                !$OMP END PARALLEL DO
@@ -215,16 +217,11 @@
             !
 
 
-            if (iCycle .le. pnSkip) then
+            if (iCycle .le. pnCycles) then
                rKeff = real(N_KEFFSRC) / real(N_KEFFHIS)
             endif
      
-            if (abs(rKeff - (real(N_KEFFSRC) / real(N_KEFFHIS))) <
-     &          (OUTLIER_CONTROL)) then     
-               rKeff = real(N_KEFFSRC) / real(N_KEFFHIS)
-            else
-               nTotCycles = nTotCycles + 1
-            endif
+
             ! WE SET THE GUESS K-EFF OF NEXT CYCLE TO CURRENT K-EFF VALUE.
             KEFF_GUESS = rKeff
 
@@ -237,6 +234,9 @@
                rKeffSqAvg = (1.0 - 1.0 / real(iCycle-pnSkip)) 
      &                     * rKeffSqAvg +
      &                    rKeff**2 / real(iCycle-pnSkip)
+               rKeffError = sqrt((rKeffSqAvg - rKeffAvg**2) / 
+     &               real(iCycle-pnSkip-1))
+               rKeffError = rKeffError / sqrt(real(iCycle-pnSkip-1))
             endif
 
             !-----------HERE WE END THE CPU TIME COUNTER
@@ -251,7 +251,8 @@
             ! IF CURRENT CYCLE IS LESS THAN SKIP COUNT,  WE IGNORE PRINTING THE 
             ! MOVING AVERAGE OF K-EFF.
             if(iCycle .le. pnSkip) then
-               write(*,'(I10,2X,F10.5,2X,2A10,F10.3,2X,I6,A2,I2,A1)') 
+               write(*,
+     &         '(I10,2X,F10.5,2X,A10,2X,A10,F10.3,2X,I6,A2,I2,A1)')
      &             iCycle, rKeff, 'SKIP', 'INACTIVE',
      &             ShannonEntropy(), iCPUMinutes, 'm ', iCPUSeconds, 's'
                write(NFO,
@@ -259,19 +260,20 @@
      &             iCycle, rKeff, 0.0,
      &             ShannonEntropy(), iCPUMinutes, 'm ', iCPUSeconds, 's'
             else
-            write(*,'(I10,2X,F10.5,2X,F10.5,A10,F10.3,2X,I6,A2,I2,A1)')
-     &             iCycle, rKeff, rKeffAvg , 'ACTIVE',
+               write(*,
+     &         '(I10,2X,F10.5,2X,F10.5,2X,F10.5,F10.3,2X,I6,A2,I2,A1)')
+     &             iCycle, rKeff, rKeffAvg , rKeffError,
      &             ShannonEntropy(), iCPUMinutes, 'm ', iCPUSeconds, 's'
                write(NFO,
-     &         '(I10,2X,F10.5,2X,F10.5,2X,F10.5,I6,A2,I2,A1)') 
-     &            iCycle, rKeff, rKeffAvg, ShannonEntropy(), 
+     &         '(I10,2X,F10.5,2X,F10.5,2X,F10.5, 2X,F10.5,I6,A2,I2,A1)') 
+     &            iCycle, rKeff, rKeffAvg, rKeffError, ShannonEntropy(), 
      &            iCPUMinutes, 'm ', iCPUSeconds, 's'
             endif
             ! NOW WE SET FISSION NEUTRONS AT THE COLLISION SITES AS THE NEUTRON
             ! SOURCE OF THE NEXT CRITICALITY CALCULATION CYCLE.
             KEFF_WGT = real(N_KEFFHIS) / real(N_KEFFSRC)
             
-            !call SShannonEntropy()
+
             call SetNextGenerationSource()
             
             KEFF_CYCLE = KEFF_CYCLE + 1
@@ -316,7 +318,7 @@
                      iCPUMinTot = iCPUMinTot + 
      &                 int(floor(real(iCPUSecTot)/60.0))
                      iCPUSecTot = iCPUSecTot - 
-     &                 int(floor(real(iCPUSecTot)/60.0))
+     &                 iCPUMinTot*60
                      write(NFO,'(A,I0,A,I0,A)')     
      &                   '  Elapse time     : ',
      &                   iCPUMinTot, 'm ', iCPUSecTot, 's'     
@@ -415,11 +417,11 @@
             ! FINALLY WE REGISTER  THE LOCATION  OF THE NEUTRON TO THE  NEUTRON
             ! NEUTRON BANK RECORD.
 
-            if(KEFF_CYCLE .le. TOTAL_CYCLE) then
-               call ScoreTrackLengthTally(TRACK_NID, 
-     &               KEFF_WGT*real(N_KEFFHIS))
-               return
-            endif
+c            if(KEFF_CYCLE .le. TOTAL_CYCLE) then
+c               call ScoreTrackLengthTally(TRACK_NID, 
+c     &               KEFF_WGT*real(N_KEFFHIS))
+c               return
+c            endif
             
          end subroutine
          
@@ -609,6 +611,8 @@ c               iNu = int(rNu)
 !        THIS SUBROUTINE RANDOMLY SELECTS FISSION SOURCES FROM THE FISSION NEU-
 !        TRON BANK.
 !        ----------------------------------------------------------------------
+
+         
          subroutine SetNextGenerationSource()
             integer :: i, j, n
             real    :: rEpsilon

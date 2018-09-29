@@ -43,7 +43,11 @@
          ! HERE WE GENERATE RUN ID FOR SIMULATION IDENTIFICATION PURPOSE
          call date_and_time(DATE=tDate,TIME=tTime)       
          cRunID = trim(tDate)//'-'// tTime(1:6)// '-'// tTime(8:10) 
-         print*, ' TRIMON Version 1.180916.175015 Build 132'
+         print*,'  _____ _____  _  __  __  ____  __  _  '
+         print*,' |_   _|| () )| ||  \/  |/ () \|  \| | '
+         print*,'   |_|  |_|\_\|_||_|\/|_|\____/|_|\__| '
+         
+         print*,'        Version 1.180929.142800    '
          print* 
             
          if(iargc() .eq. 1) then
@@ -92,6 +96,9 @@
          close(unit=NFI)
          
          open(unit=iTXSUnit, file=cTXSFileName, err=95)
+!        HERE WE INITIALIZE CELL INDICES FOR MORE CODE PERFORMANCE
+!        THIS IS TO PREVENT EXTRA LOOPS WHEN SEARCHING FOR CELL INDEX.
+         call InitCellIndex()
          call InitTXSReader(iTXSUnit)
          print'(A,$)', '  HGMC: Initializing tally counter.'
          call InitTally()

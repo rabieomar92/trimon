@@ -78,19 +78,12 @@
          real    :: BOTREFLECTOR_THICKNESS = 0.0
          real    :: FUEL_LENGTH         = 38.1
          integer :: LAYER_COUNT         = 20
-         real :: RING_RADIUS(7)   = 
+         integer :: CELL_INDEX(127,2)
+         real    :: RING_RADIUS(7)   = 
      &           (/ 9.08, 18.16, 27.24, 36.32, 45.40, 54.48, 0.0/)
-c         real :: LAYER_HEIGHT(LAYER_COUNT) =
-c     &           (/ 1*FUEL_LENGTH / real(LAYER_COUNT),
-c     &              2*FUEL_LENGTH / real(LAYER_COUNT),
-c     &              3*FUEL_LENGTH / real(LAYER_COUNT),
-c     &              4*FUEL_LENGTH / real(LAYER_COUNT),
-c     &              5*FUEL_LENGTH / real(LAYER_COUNT),
-c     &              6*FUEL_LENGTH / real(LAYER_COUNT),
-c     &              7*FUEL_LENGTH / real(LAYER_COUNT),
-c     &              8*FUEL_LENGTH / real(LAYER_COUNT),
-c     &              9*FUEL_LENGTH / real(LAYER_COUNT),
-c     &             10*FUEL_LENGTH / real(LAYER_COUNT) /)
+         integer :: naA(7) = (/ 1, 6, 12, 18, 24, 30, 36 /)   ! NUMBER OF CELLS PER RING
+         integer :: naB(7) = (/ 1, 7, 19, 37, 61, 91, 127 /) 
+
      
 
      
@@ -111,10 +104,6 @@ c     &             10*FUEL_LENGTH / real(LAYER_COUNT) /)
       real function RingRadius(piRingID)
          implicit none
          integer, intent(in) :: piRingID
-!         real :: rRingRadius(7) = (/ 3.149, 6.298, 9.447, 
-!     &                              12.596, 15.745, 18.894,
-!     &                              22.043 /)
-
          RingRadius = 0.0
          if(piRingID .gt. 0 .and. piRingID .le. RING_COUNT) then
             RingRadius = RING_RADIUS(piRingID)
@@ -154,11 +143,10 @@ c     &             10*FUEL_LENGTH / real(LAYER_COUNT) /)
 
          real,    intent(in)  :: prX, prY, prZ
          integer, intent(out) :: piCellID, piLayerID
-     
-         integer :: nRing(7) = (/ 1, 6, 12, 18, 24, 30, 36 /)
+
          real    :: rRadius, rTheta, rZ, rTemp1, rTemp2
          integer :: iI, iK, iL, iID, i, j, k, m, iQuadrant
-
+         real    :: rYX, rAtanYX
          piCellID  = -2
          piLayerID = -2
 
@@ -171,42 +159,15 @@ c     &             10*FUEL_LENGTH / real(LAYER_COUNT) /)
          if(rRadius .eq. 0.0) then
             iID = 1
             piCellID = 1
-            goto 2
+           return
          endif
 !        ----------------------------------------------------------------
 !        INDICATES THAT THE PARTICLE IS WITHIN REFLECTOR. RETURNS (-1,-1)
 !        IF THE PARTICLE IS OUTSIDE THE REFLECTOR & CORE, RETURNS (-2,-2)
 !        ----------------------------------------------------------------
 
-c         if((prZ .lt. 0.0) .or. 
-c     &      (prZ .gt. LayerHeight(LayerCount()))) then
-c               piCellID  = -2
-c               piLayerID = -2        
-c               return            
-c         endif
-c         if((rRadius .ge. RingRadius(RingCount())) .and.
-c     &      (rRadius .le. (RingRadius(RingCount()) + 
-c     &                     ReflectorThickness()))   ) then
-c            piCellID  = -1
-c            if((prZ .ge. 0.0) .and. 
-c     &         (prZ .le. LayerHeight(LayerCount()))) then
-c               piLayerID = -1
-c               return
-c            else
-c               piCellID  = -2
-c               piLayerID = -2        
-c               return
-c            endif
-c         elseif(rRadius .gt. (RingRadius(RingCount()) + 
-c     &          ReflectorThickness())) then
-c            piCellID  = -2
-c            piLayerID = -2  
-c            return
-c         endif
-         
-         if((prZ .lt. -BReflectorThickness()) .or. 
-     &      (prZ .gt. (LayerHeight(LayerCount()) + 
-     &                 TReflectorThickness()))) then
+         if((prZ .lt. 0.0) .or. 
+     &      (prZ .gt. LayerHeight(LayerCount()))) then
                piCellID  = -2
                piLayerID = -2        
                return            
@@ -215,27 +176,13 @@ c         endif
      &      (rRadius .le. (RingRadius(RingCount()) + 
      &                     ReflectorThickness()))   ) then
             piCellID  = -1
-            if((prZ .ge. -BReflectorThickness()) .and. 
-     &         (prZ .le. (LayerHeight(LayerCount()) + 
-     &                 TReflectorThickness()))) then
+            if((prZ .ge. 0.0) .and. 
+     &         (prZ .le. LayerHeight(LayerCount()))) then
                piLayerID = -1
                return
             else
                piCellID  = -2
                piLayerID = -2        
-               return
-            endif
-         elseif(rRadius .lt. RingRadius(RingCount())) then
-            if((prZ .gt. LayerHeight(LayerCount())) .and.
-     &         (prZ .lt. (LayerHeight(LayerCount()) + 
-     &                    TReflectorThickness()      ))) then
-               piCellID  = -1
-               piLayerID = -1
-               return
-            elseif((prZ .gt. -BReflectorThickness()) .and.
-     &             (prZ .lt. 0.0)) then
-               piCellID  = -1
-               piLayerID = -1    
                return
             endif
          elseif(rRadius .gt. (RingRadius(RingCount()) + 
@@ -244,34 +191,21 @@ c         endif
             piLayerID = -2  
             return
          endif
+         
 
   
 !        ----------------------------------------------------------------
 !        INDICATES THAT THE PARTICLE IS WITHIN THE REACTOR CORE STD CELL.
 !        ----------------------------------------------------------------         
-         i = 1
-         do i=1, RingCount(), 1
-            if(i .eq. 1) then
-               if((rRadius .lt. RingRadius(i)) .and.
-     &            (rRadius .ge. 0.0)) then
-                  iI = 1
-                  goto 1
-               endif
-            else
-               if((rRadius .le. RingRadius(i)) .and.
-     &             (rRadius .ge. RingRadius(i-1))) then
-                  iI = i
-                  goto 1
-               endif
-            endif
-         enddo
-1        continue
+         iI = int((RING_COUNT*rRadius/RingRadius(RING_COUNT))) + 1
 
 !        CLASSIFY prX AND prY INTO THE APPROPRIATE QUADRANT.
          if((prX .lt. 0) .and. (prY .ge. 0)) iQuadrant = 1
          if((prX .ge. 0) .and. (prY .ge. 0)) iQuadrant = 2
          if((prX .ge. 0) .and. (prY .lt. 0)) iQuadrant = 3
          if((prX .lt. 0) .and. (prY .lt. 0)) iQuadrant = 4         
+         
+
          select case (iQuadrant)
             case (1)
                rTheta = atan(abs(prY/prX))
@@ -280,53 +214,11 @@ c         endif
             case (3)
                rTheta = 3.141592654 + atan(abs(prY/prX))
             case (4)
-               rTheta = 2.0*3.141592654 - atan(abs(prY/prX))
+               rTheta = 6.283185308 - atan(abs(prY/prX))
          end select
-         do j=1, 127, 1
-            call CellIndex(j,i,k)
-!           IF THE ITERATION HAS ARRIVED AT RING iI...
-            if(i .eq. iI) then
-               if(k .eq. 1) then
-                  rTemp1 = ThetaFromIndex(i, k)
-                  rTemp2 = ThetaFromIndex(i, nRing(iI))
-                  if((rTheta .le. rTemp1) .and. (rTheta .ge. 0.0)) then
-                     iID = j
-                     goto 2
-                  elseif((rTheta .le. (2.0*3.141592654)) 
-     &               .and. (rTheta .ge. rTemp2)) then
-                     iID = j
-                     goto 2                  
-                  endif
-               else
-                  rTemp1 = ThetaFromIndex(i, k)
-                  rTemp2 = ThetaFromIndex(i, k-1)       
-                  if((rTheta .le. rTemp1) .and.
-     &             (rTheta .ge. rTemp2)) then
-                     iID = j
-                     goto 2
-                  endif       
-               endif
-            endif
-         enddo
-2        continue
-         i = 1
-         do i=1, LAYER_COUNT, 1
-            if(i .eq. 1) then
-               if((prZ .le. LayerHeight(i)) .and. 
-     &            (prZ .ge. 0.0)) then
-                  iL = 1
-                  goto 3
-               endif
-            else
-               if((prZ .le. LayerHeight(i)) .and.
-     &            (prZ .gt. LayerHeight(i-1))) then
-                  iL = i
-                  goto 3
-               endif
-            endif
-         enddo
-3        continue      
          
+         iID = int(floor(rTheta*naA(iI)/6.283185308)) + naB(iI-1)   
+         iL  = int((LAYER_COUNT*prZ/LayerHeight(LAYER_COUNT))) + 1
          piCellID  = iID
          piLayerID = iL
          
@@ -346,7 +238,9 @@ c         endif
          prTheta = 0.0
          if ((piCellID .gt. 127) .or. (piCellID .lt. 1)) return
          prRadius = RingRadius(piCellID )
-         call CellIndex(piCellID , i, k)
+         !call CellIndex(piCellID , i, k)
+         i = CELL_INDEX(piCellID,1)
+         k = CELL_INDEX(piCellID,2)
          prTheta = ThetaFromIndex(i,k)
          return
       end subroutine
@@ -358,7 +252,9 @@ c         endif
          integer :: iI, iK
          CellRadius = 0.0
          if ((piCellID .gt. 127) .or. (piCellID .lt. 1)) return
-         call CellIndex(piCellID , iI, iK)
+         !call CellIndex(piCellID , iI, iK)
+         iI = CELL_INDEX(piCellID,1)
+         iK = CELL_INDEX(piCellID,2)
          if(iI .gt. 0 .and. iI .le. RingCount()) then
             CellRadius = RingRadius(iI)
             return
@@ -401,6 +297,17 @@ c         endif
          return
       end subroutine
 
+      subroutine InitCellIndex()
+         integer :: i, j, k 
+         
+         do j=1, 127, 1
+            call CellIndex(j,i,k)
+            CELL_INDEX(j,1) = i 
+            CELL_INDEX(j,2) = k
+         enddo
+         
+         return
+      end subroutine
 !     THIS SUBROUTINE RETURNS THE CELL INDICES (I,K) FROM THE CELL-ID.
 !     IF THE CELL ID IS 3 THEN IT RETURNS (2,2) (WHICH IS B-02).      
       subroutine CellIndex(piCellID , piI, piK)
@@ -546,7 +453,7 @@ c         endif
          real :: rX, rY, rZ, j
          integer :: iC2, iL2, i
          logical :: lCorrectionDone = .false.
-         
+         real :: rSinTFI, rCosTFI
          rX = prX
          rY = prY
          rZ = prZ
@@ -572,22 +479,26 @@ c         endif
 !        ---------------------------------------------------------------------
 2        continue
          call GetCurrentCell(rX, rY, rZ, iC, iL)
-         j = -10.0
-         do i=1,5,1
-            call GetCurrentCell(rX+10.0**j*prU,
-     &                          rY+10.0**j*prV,
-     &                          rZ+10.0**j*prW, iC2, iL2)
-            j = j + 1.0
-            if((iC2 .ne. iC) .or. (iL2 .ne. iL)) then
-               iC = iC2
-               iL = iL2
-               goto 3
-            endif
-         enddo
+         
+c         j = -10.0
+c         do i=1,5,1
+c            call GetCurrentCell(rX+10.0**j*prU,
+c     &                          rY+10.0**j*prV,
+c     &                          rZ+10.0**j*prW, iC2, iL2)
+c            j = j + 1.0
+c            if((iC2 .ne. iC) .or. (iL2 .ne. iL)) then
+c               iC = iC2
+c               iL = iL2
+c               goto 3
+c            endif
+c         enddo
 3        continue
+
 !        Determine the cell index of the specified cell ID (iC).
          if(iC .gt. 0) then
-            call CellIndex(iC, iI, iK)                    
+            ! call CellIndex(iC, iI, iK)     
+            iI = CELL_INDEX(iC,1)
+            iK = CELL_INDEX(iC,2)
          endif
 
 !        -----------------------------------------------------------------------         
@@ -721,16 +632,18 @@ c         endif
 !        We begin calculating for the planar surface parallel to z-axis.
 !        Calculating for Surface A
 !        Here we define all known points (cell vertices that span on the plane). 
-         rX1 = - RingRadius(iI) * cos(ThetaFromIndex(iI, iK))
-         rY1 =   RingRadius(iI) * sin(ThetaFromIndex(iI, iK))
+         rCosTFI = cos(ThetaFromIndex(iI, iK))
+         rSinTFI = sin(ThetaFromIndex(iI, iK))
+         rX1 = - RingRadius(iI) * rCosTFI
+         rY1 =   RingRadius(iI) * rSinTFI
          rZ1 =   LayerHeight(iL)
          
-         rX2 = - RingRadius(iI-1) * cos(ThetaFromIndex(iI, iK))
-         rY2 =   RingRadius(iI-1) * sin(ThetaFromIndex(iI, iK))
+         rX2 = - RingRadius(iI-1) * rCosTFI
+         rY2 =   RingRadius(iI-1) * rSinTFI
          rZ2 =   LayerHeight(iL)
          
-         rX3 = - RingRadius(iI) * cos(ThetaFromIndex(iI, iK))
-         rY3 =   RingRadius(iI) * sin(ThetaFromIndex(iI, iK))
+         rX3 = - RingRadius(iI) * rCosTFI
+         rY3 =   RingRadius(iI) * rSinTFI
          rZ3 =   LayerHeight(iL-1)
 !        Then we calculate the coefficients A, B, C from the formula.         
          rAp = rY2*rZ3 + rY3*rZ1 + rY1*rZ2 - rY2*rZ1 - rY1*rZ3 - rY3*rZ2
@@ -749,16 +662,18 @@ c         endif
          endif
          
 !        We begin calculating for Surface B.
-         rX1 = - RingRadius(iI) * cos(ThetaFromIndex(iI, iK-1))
-         rY1 =   RingRadius(iI) * sin(ThetaFromIndex(iI, iK-1))
+         rCosTFI = cos(ThetaFromIndex(iI, iK-1))
+         rSinTFI = sin(ThetaFromIndex(iI, iK-1))
+         rX1 = - RingRadius(iI) * rCosTFI
+         rY1 =   RingRadius(iI) * rSinTFI
          rZ1 =   LayerHeight(iL)
          
-         rX2 = - RingRadius(iI-1) * cos(ThetaFromIndex(iI, iK-1))
-         rY2 =   RingRadius(iI-1) * sin(ThetaFromIndex(iI, iK-1))
+         rX2 = - RingRadius(iI-1) * rCosTFI
+         rY2 =   RingRadius(iI-1) * rSinTFI
          rZ2 =   LayerHeight(iL)
          
-         rX3 = - RingRadius(iI) * cos(ThetaFromIndex(iI, iK-1))
-         rY3 =   RingRadius(iI) * sin(ThetaFromIndex(iI, iK-1))
+         rX3 = - RingRadius(iI) * rCosTFI
+         rY3 =   RingRadius(iI) * rSinTFI
          rZ3 =   LayerHeight(iL-1)
          
          rAp = rY2*rZ3 + rY3*rZ1 + rY1*rZ2 - rY2*rZ1 - rY1*rZ3 - rY3*rZ2
@@ -845,7 +760,7 @@ c         endif
          real :: e
          
          call GetCurrentCell(prX, prY, prZ, piCellID, piLayerID)
-         e = -10.0
+         e = -20.0
          do i=1, 5, 1
             call GetCurrentCell(prX+10.0**e*prU,
      &                          prY+10.0**e*prV,

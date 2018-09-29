@@ -90,18 +90,17 @@
          
             integer i, j, k 
             
-            do i=1, TXS_CEL, 1
-               do j=1, TXS_LAY, 1
-                  do k=1, TXS_GRP, 1
-                  
-                     ! FOR TRACK LENGTH TALLY
-                     TLY_TLVAL(i, j, k) = 0.0
-                     
-                     TLY_ABSEST = 0.0
-                     TLY_TLEST = 0.0                     
-                  enddo
-               enddo
-            enddo
+            TLY_TLVAL = 0.0d0
+c            do i=1, TXS_CEL, 1
+c               do j=1, TXS_LAY, 1
+c                  do k=1, TXS_GRP, 1
+c                  
+c                     ! FOR TRACK LENGTH TALLY
+c                     TLY_TLVAL(i, j, k) = 0.0
+c               
+c                  enddo
+c               enddo
+c            enddo
         
             return
             
