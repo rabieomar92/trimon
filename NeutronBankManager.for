@@ -1,6 +1,6 @@
 !                                                                       
-!     Neutron Bank Manager Module, Revision 180915-1.
-!     Author M. R. Omar, October 2017. All copyrights reserved, 2017.
+!     Neutron Bank Manager Module, Revision 200413-1.
+!     Author M. R. Omar, October 2020. All copyrights reserved, 2020.
 !     (c) Universiti Sains Malaysia
 !     (c) Malaysian Nuclear Agency
 !
@@ -14,7 +14,8 @@
 !     owners.
 !
 !     This source code was created on 1/11/2017 11:15 PM by M. R. Omar.
-!     Last revision date 15/9/2018.
+!     Last revision date 13/4/2020. Neutron bank modified to accomodate
+!     the survival biasing technique.
 !
 
       module NeutronBankManager
@@ -41,8 +42,11 @@
          integer, allocatable :: PARNT(:,:)  ! PARENT NEUTRON ID, (-1 FOR NO PARENT)
          integer, allocatable :: ISTAT(:,:)  ! STATUS ((>4)-EMPTY, 0-WAIT_QUEUE,
                                              ! 1-KILLED, 2-ESCAPED, 3-RANDOM STRIDE OVERFLOW)
+         integer, allocatable :: ISGEN(:,:)  ! STARTING NEUTRON GENERATION (FOR SCO)
+         real   , allocatable :: B_DIR(:,:)  ! BORN DIRECTION                                    
          real   , allocatable :: C_WGT(:,:)  ! NEUTRON WEIGHT.
          real   , allocatable :: L_WGT(:,:)  ! LAST NEUTRON WEIGHT
+         real   , allocatable :: C_AWT(:,:)  ! ABSORBED WEIGHT FOR SURVIVAL BIASING.
          
          ! SPECIAL FISSION BANK
          
@@ -64,12 +68,18 @@
                                               ! 1-KILLED, 2-ESCAPED, 3-RANDOM STRIDE OVERFLOW)
          real   , allocatable :: FC_WGT(:,:)  ! NEUTRON WEIGHT.
          real   , allocatable :: FL_WGT(:,:)  ! LAST NEUTRON WEIGHT
-         integer :: N_COUNT   ! TOTAL NUMBER OF NEUTRONS IN THE BANK
-         integer :: N_SOURCE  ! NUMBER OF SOURCE NEUTRONS
+         real   , allocatable :: FB_DIR(:,:)  ! BORN DIRECTION
+         real   , allocatable :: FC_AWT(:,:)  ! ABSORBED WEIGHT FOR SURVIVAL BIASING.
+         
+       
+         
+         integer :: N_COUNT  =0  ! TOTAL NUMBER OF NEUTRONS IN THE BANK
+         integer :: N_SOURCE =0 ! NUMBER OF SOURCE NEUTRONS
          integer :: N_GROUP   ! NUMBER OF NEUTRON GROUPS
          integer :: N_KEFFSRC ! NUMBER OF K-EFF SOURCE COUNT
          integer :: N_KEFFHIS ! NUMBER OF K-EFF HISTORY TRACK
-         integer, parameter :: BANK_SIZE = 5000000
+         integer :: N_KEFFDLY
+         integer, parameter :: BANK_SIZE = 6000000_8
          ! Neutron reaction parameters
          integer, parameter :: RXN_FISSION = 3
          integer, parameter :: RXN_CAPTURE = 1
@@ -108,6 +118,9 @@
             allocate( ISTAT(BANK_SIZE, 1) )
             allocate( C_WGT(BANK_SIZE, 1) )
             allocate( L_WGT(BANK_SIZE, 1) )
+            allocate( B_DIR(BANK_SIZE, 3) )
+            allocate( ISGEN(BANK_SIZE, 1) )
+            allocate( C_AWT(BANK_SIZE, 1) )
             ! INITIALIZE FISSION BANK
             allocate( FC_DIR(BANK_SIZE, 3) )
             allocate( FL_DIR(BANK_SIZE, 3) )
@@ -126,6 +139,8 @@
             allocate( FISTAT(BANK_SIZE, 1) )
             allocate( FC_WGT(BANK_SIZE, 1) )
             allocate( FL_WGT(BANK_SIZE, 1) )
+            allocate( FB_DIR(BANK_SIZE, 3) )
+            allocate( FC_AWT(BANK_SIZE, 1) )
             return
             
          end subroutine
@@ -142,6 +157,7 @@
             return
          end subroutine
          
+         
          subroutine SetKeffHistoryCount(pnHistoryCount)
             integer, intent(in) :: pnHistoryCount
             if(pnHistoryCount .gt. 0) N_KEFFHIS = pnHistoryCount
@@ -151,23 +167,22 @@
          
          subroutine AddPrimaryNeutron(prX, prY, prZ, 
      &                                prU, prV, prW,
-     &                                piG, prWgt)
+     &                                piG, prWgt, piGen)
  
             implicit none
             
             real   , intent(in) :: prX, prY, prZ, prU, prV, prW, prWgt
-            integer, intent(in) :: piG
+            integer, intent(in) :: piG, piGen
             
             integer :: iCell, iLayer
             if(N_COUNT .gt. BANK_SIZE) then
-               print*, ' Fatal Error: Neutron bank is full!'
+               print*, ' HGMC: Fatal error. Primary bank is full!'
+               stop
                return
             endif
             
-            call GetTargetCell(prX, prY, prZ,
-     &                         prU, prV, prW,
+            call GetCurrentCell(prX, prY, prZ,
      &                         iCell, iLayer)
-     
             N_COUNT = N_COUNT + 1
             N_SOURCE = N_SOURCE + 1
             
@@ -186,6 +201,9 @@
             B_POS(N_COUNT, 1) = prX
             B_POS(N_COUNT, 2) = prY
             B_POS(N_COUNT, 3) = prZ
+            B_DIR(N_COUNT, 1) = prU
+            B_DIR(N_COUNT, 2) = prV
+            B_DIR(N_COUNT, 3) = prW            
             C_CEL(N_COUNT, 1) = iCell
             C_CEL(N_COUNT, 2) = iLayer
             L_CEL(N_COUNT, 1) = iCell
@@ -199,84 +217,30 @@
             ISTAT(N_COUNT, 1) = 0         ! 0 - WAIT_QUEUE
             C_WGT(N_COUNT, 1) = prWgt
             L_WGT(N_COUNT, 1) = prWgt
+            C_AWT(N_COUNT, 1) = 0.0
+            ISGEN(N_COUNT, 1) = piGen
             return
             
          end subroutine
-         
-         subroutine AddSecondaryNeutron(prX, prY, prZ, 
-     &                                  prU, prV, prW, 
-     &                                  piG, piParent, piLastRxn, prWgt)
 
-            real   , intent(in) :: prX, prY, prZ, prU, prV, prW, prWgt
-            integer, intent(in) :: piG, piParent, piLastRxn
-            
-            integer :: iCell, iLayer
-            
-            if(N_COUNT .gt. BANK_SIZE) then
-               print*, ' Fatal Error: Neutron bank is full!'
-               return
-            endif
-            
-            call GetTargetCell(prX, prY, prZ,
-     &                         prU, prV, prW,
-     &                         iCell, iLayer)
-     
-            N_COUNT = N_COUNT + 1
-            
-            C_DIR(N_COUNT, 1) = prU
-            C_DIR(N_COUNT, 2) = prV
-            C_DIR(N_COUNT, 3) = prW
-            L_DIR(N_COUNT, 1) = prU
-            L_DIR(N_COUNT, 2) = prV
-            L_DIR(N_COUNT, 3) = prW
-            C_POS(N_COUNT, 1) = prX
-            C_POS(N_COUNT, 2) = prY
-            C_POS(N_COUNT, 3) = prZ
-            L_POS(N_COUNT, 1) = prX
-            L_POS(N_COUNT, 2) = prY
-            L_POS(N_COUNT, 3) = prZ
-            B_POS(N_COUNT, 1) = prX
-            B_POS(N_COUNT, 2) = prY
-            B_POS(N_COUNT, 3) = prZ
-            C_CEL(N_COUNT, 1) = iCell
-            C_CEL(N_COUNT, 2) = iLayer
-            B_CEL(N_COUNT, 1) = iCell
-            B_CEL(N_COUNT, 2) = iLayer
-            C_GRP(N_COUNT, 1) = piG
-            L_GRP(N_COUNT, 1) = piG
-            NCHLD(N_COUNT, 1) = 0         ! 0 - NO CHILD NEUTRONS
-            PARNT(N_COUNT, 1) = piParent  
-            ISTAT(N_COUNT, 1) = 0         ! 0 - WAIT_QUEUE     
-            L_COL(N_COUNT, 1) = prX
-            L_COL(N_COUNT, 2) = prY
-            L_COL(N_COUNT, 3) = prZ
-            L_RXN(N_COUNT, 1) = piLastRxn
-            C_WGT(N_COUNT, 1) = prWgt
-            L_WGT(N_COUNT, 1) = prWgt
-            return
-            
-         end subroutine
 
          subroutine AddFissionNeutron(prX, prY, prZ,
      &                                prU, prV, prW,
-     &                                piG, prWgt)
+     &                                piG, prWgt, piCell,
+     &                                piLayer)
  
             implicit none
             
             real   , intent(in) :: prX, prY, prZ, prU, prV, prW, prWgt
-            integer, intent(in) :: piG
+            integer, intent(in) :: piG, piCell, piLayer
             
             integer :: iCell, iLayer
-            if(N_COUNT .gt. BANK_SIZE) then
-               print*, ' Fatal Error: Neutron bank is full!'
+            if(N_KEFFSRC .gt. BANK_SIZE) then
+               print*, ' HGMC: Fatal error. Fission bank is full!'
+               stop
                return
             endif
             
-c            call GetTargetCell(prX, prY, prZ,
-c     &                         prU, prV, prW,
-c     &                         iCell, iLayer)
-            call GetCurrentCell(prX, prY, prZ,
-     &                         iCell, iLayer)     
             N_KEFFSRC = N_KEFFSRC + 1
             
             FC_DIR(N_KEFFSRC, 1) = prU
@@ -294,12 +258,15 @@ c     &                         iCell, iLayer)
             FB_POS(N_KEFFSRC, 1) = prX
             FB_POS(N_KEFFSRC, 2) = prY
             FB_POS(N_KEFFSRC, 3) = prZ
-            FC_CEL(N_KEFFSRC, 1) = iCell
-            FC_CEL(N_KEFFSRC, 2) = iLayer
-            FL_CEL(N_KEFFSRC, 1) = iCell
-            FL_CEL(N_KEFFSRC, 2) = iLayer
-            FB_CEL(N_KEFFSRC, 1) = iCell
-            FB_CEL(N_KEFFSRC, 2) = iLayer
+            FB_DIR(N_KEFFSRC, 1) = prU
+            FB_DIR(N_KEFFSRC, 2) = prV
+            FB_DIR(N_KEFFSRC, 3) = prW
+            FC_CEL(N_KEFFSRC, 1) = piCell
+            FC_CEL(N_KEFFSRC, 2) = piLayer
+            FL_CEL(N_KEFFSRC, 1) = piCell
+            FL_CEL(N_KEFFSRC, 2) = piLayer
+            FB_CEL(N_KEFFSRC, 1) = piCell
+            FB_CEL(N_KEFFSRC, 2) = piLayer
             FC_GRP(N_KEFFSRC, 1) = piG
             FL_GRP(N_KEFFSRC, 1) = piG
             FNCHLD(N_KEFFSRC, 1) = 0         ! 0 - NO CHILD NEUTRONS
@@ -307,172 +274,21 @@ c     &                         iCell, iLayer)
             FISTAT(N_KEFFSRC, 1) = N_WAIT         ! 0 - WAIT_QUEUE
             FC_WGT(N_KEFFSRC, 1) = prWgt  
             FL_WGT(N_KEFFSRC, 1) = prWgt
+            FC_AWT(N_KEFFSRC, 1) = 0.0
             return
             
          end subroutine
-         
 
-         subroutine KillNeutron(piNID, piReason, piStat)
-            integer, intent(in) :: piNID, piReason
-            integer, intent(out) :: piStat
-            
-            if((piNID .gt. 0) .and. (piNID .le. N_COUNT)) then
-               if(ISTAT(piNID, 1) .ne. N_WAIT) then
-                  ! Case killing a killed neutron.
-                  piStat = 1
-                  return
-               else
-                  ISTAT(piNID, 1) = piReason
-                  piStat = 0
-                  return
-               endif
-            else
-               ! Case invalid NID.
-               piStat = 2
-               return
-            endif
-         end subroutine
-         
          integer function PrimaryCount()
             PrimaryCount = N_SOURCE
             return
          end function
          
-         integer function SecondaryCount()
-            SecondaryCount = N_COUNT - N_SOURCE
-            return
-         end function
-         
          integer function TotalNeutronCount()
-            TotalNeutronCount = N_COUNT
+            TotalNeutronCount = N_SOURCE
             return
          end function
          
-         subroutine SetNeutronDirection(piNID, prU, prV, prW, piStat)
-            integer, intent(in) :: piNID
-            real   , intent(in) :: prU, prV, prW
-            integer, intent(out) :: piStat
-            if((piNID .gt. 0) .and. (piNID .le. N_COUNT)) then
-               if(ISTAT(piNID, 1) .ne. N_WAIT) then
-                  ! Case if the neutron is already killed.
-                  piStat = 1
-                  return
-               else
-                  L_DIR(piNID, 1) = C_DIR(piNID, 1)
-                  L_DIR(piNID, 2) = C_DIR(piNID, 2)
-                  L_DIR(piNID, 3) = C_DIR(piNID, 3)      
-                  C_DIR(piNID, 1) = prU
-                  C_DIR(piNID, 2) = prV
-                  C_DIR(piNID, 3) = prW
-                  piStat = 0
-                  return
-               endif
-            else
-               ! Case if invalid NID is specified.
-               piStat = 2
-               return
-            endif
-         end subroutine
-         
-         subroutine SetNeutronPosition(piNID, prX, prY, prZ, piStat)
-            integer, intent(in) :: piNID
-            real   , intent(in) :: prX, prY, prZ
-            integer, intent(out) :: piStat  
-            
-            integer :: iCell, iLayer
-            
 
-            
-            if((piNID .gt. 0) .and. (piNID .le. N_COUNT)) then
-               if(ISTAT(piNID, 1) .ne. N_WAIT) then
-                  ! Case if the neutron is not online.
-                  piStat = 1
-                  return
-               else
-               
-                  call GetTargetCell(prX, prY, prZ, 
-     &                               C_DIR(piNID,1),
-     &                               C_DIR(piNID,1),
-     &                               C_DIR(piNID,1),
-     &                               iCell, iLayer)
-                  if((C_DIR(piNID,1) .gt. TXS_CEL) .or. 
-     &               (C_DIR(piNID,1) .lt. -2     )) then
-                     C_DIR(piNID,1) = -2
-                  endif
-                  if((C_DIR(piNID,2) .gt. TXS_LAY) .or. 
-     &               (C_DIR(piNID,2) .lt. -2     )) then
-                     C_DIR(piNID,2) = -2
-                  endif
-                  L_POS(piNID, 1) = C_POS(piNID, 1)
-                  L_POS(piNID, 2) = C_POS(piNID, 2)
-                  L_POS(piNID, 3) = C_POS(piNID, 3)      
-                  C_POS(piNID, 1) = prX
-                  C_POS(piNID, 2) = prY
-                  C_POS(piNID, 3) = prZ
-                  L_CEL(piNID, 1) = C_CEL(piNID, 1)
-                  L_CEL(piNID, 2) = C_CEL(piNID, 2)
-                  C_CEL(piNID, 1) = iCell
-                  C_CEL(piNID, 2) = iLayer
-                  
-                  piStat = 0
-                  return
-               endif
-            else
-               ! Case if invalid NID is specified.
-               piStat = 2
-               return
-            endif     
-               
-         end subroutine
-         
-         subroutine SetNewEnergyGroup(piNID, piG, piStat)
-            integer, intent(in) :: piNID
-            integer, intent(in) :: piG
-            integer, intent(out) :: piStat
-            
-            if((piNID .gt. 0) .and. (piNID .le. N_COUNT)) then
-               if(ISTAT(piNID, 1) .ne. N_WAIT) then
-                  ! Case if the neutron is not online.
-                  piStat = 1
-                  return
-               else
-                  L_GRP(piNID, 1) = C_GRP(piNID, 1)
-                  C_GRP(piNID, 1) = piG
-                  piStat = 0
-                  return
-               endif
-            else
-               ! Case if invalid NID is specified.
-               piStat = 2
-               return
-            endif                
-         end subroutine
-         
-         subroutine SetLastCollisionSite(piNID, prX, prY, prZ,
-     &                                   piRxn, piStat)
-            integer, intent(in) :: piNID, piRxn
-            real   , intent(in) :: prX, prY, prZ
-            integer, intent(out) :: piStat
-            
-            if((piNID .gt. 0) .and. (piNID .le. N_COUNT)) then
-               if(ISTAT(piNID, 1) .ne. N_WAIT) then
-                  ! Case if the neutron is not online.
-                  piStat = 1
-                  return
-               else
-                  L_COL(piNID, 1) = prX
-                  L_COL(piNID, 2) = prY
-                  L_COL(piNID, 3) = prZ
-                  L_RXN(piNID, 1) = piRxn
-                  piStat = 0
-                  return
-               endif
-            else
-               ! Case if invalid NID is specified.
-               piStat = 2
-               return
-            endif     
-            
-         end subroutine
         
       end module
