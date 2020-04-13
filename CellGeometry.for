@@ -79,10 +79,12 @@
          real    :: FUEL_LENGTH         = 38.1
          integer :: LAYER_COUNT         = 20
          integer :: CELL_INDEX(127,2)
+         real    :: CELL_VOLUME(127)
          real    :: RING_RADIUS(7)   = 
      &           (/ 9.08, 18.16, 27.24, 36.32, 45.40, 54.48, 0.0/)
-         integer :: naA(7) = (/ 1, 6, 12, 18, 24, 30, 36 /)   ! NUMBER OF CELLS PER RING
-         integer :: naB(7) = (/ 1, 7, 19, 37, 61, 91, 127 /) 
+         ! NUMBER OF CELLS PER RING
+         real :: naA(7) = (/ 1.0, 6.0, 12.0, 18.0, 24.0, 30.0, 36.0 /)  
+         real :: naB(7) = (/ 0.0, 1.0, 7.0, 19.0, 37.0, 61.0, 91.0/) 
 
      
 
@@ -118,12 +120,12 @@
       end function
       
       real function TReflectorThickness()
-         TReflectorThickness = TOPREFLECTOR_THICKNESS
+         TReflectorThickness = 4.065844 !TOPREFLECTOR_THICKNESS
          return
       end function
       
       real function BReflectorThickness()
-         BReflectorThickness = BOTREFLECTOR_THICKNESS
+         BReflectorThickness = 5.8840 ! BOTREFLECTOR_THICKNESS
          return
       end function
       
@@ -137,16 +139,17 @@
          return
       end function
 
-      subroutine GetCurrentCell(prX, prY, prZ, piCellID, piLayerID)
+       subroutine GetCurrentCellx(prX, prY, prZ, piCellID, piLayerID)
 
          implicit none
 
          real,    intent(in)  :: prX, prY, prZ
          integer, intent(out) :: piCellID, piLayerID
-
+     
+         integer :: nRing(7) = (/ 1, 6, 12, 18, 24, 30, 36 /)
          real    :: rRadius, rTheta, rZ, rTemp1, rTemp2
          integer :: iI, iK, iL, iID, i, j, k, m, iQuadrant
-         real    :: rYX, rAtanYX
+
          piCellID  = -2
          piLayerID = -2
 
@@ -159,8 +162,183 @@
          if(rRadius .eq. 0.0) then
             iID = 1
             piCellID = 1
-           return
+            goto 2
          endif
+!        ----------------------------------------------------------------
+!        INDICATES THAT THE PARTICLE IS WITHIN REFLECTOR. RETURNS (-1,-1)
+!        IF THE PARTICLE IS OUTSIDE THE REFLECTOR & CORE, RETURNS (-2,-2)
+!        ----------------------------------------------------------------
+
+c         if((prZ .lt. 0.0) .or. 
+c     &      (prZ .gt. LayerHeight(LayerCount()))) then
+c               piCellID  = -2
+c               piLayerID = -2        
+c               return            
+c         endif
+c         if((rRadius .ge. RingRadius(RingCount())) .and.
+c     &      (rRadius .le. (RingRadius(RingCount()) + 
+c     &                     ReflectorThickness()))   ) then
+c            piCellID  = -1
+c            if((prZ .ge. 0.0) .and. 
+c     &         (prZ .le. LayerHeight(LayerCount()))) then
+c               piLayerID = -1
+c               return
+c            else
+c               piCellID  = -2
+c               piLayerID = -2        
+c               return
+c            endif
+c         elseif(rRadius .gt. (RingRadius(RingCount()) + 
+c     &          ReflectorThickness())) then
+c            piCellID  = -2
+c            piLayerID = -2  
+c            return
+c         endif
+         
+         if((prZ .lt. -BReflectorThickness()) .or. 
+     &      (prZ .gt. (LayerHeight(LayerCount()) + 
+     &                 TReflectorThickness()))) then
+               piCellID  = -2
+               piLayerID = -2        
+               return            
+         endif
+         if((rRadius .ge. RingRadius(RingCount())) .and.
+     &      (rRadius .le. (RingRadius(RingCount()) + 
+     &                     ReflectorThickness()))   ) then
+            piCellID  = -1
+            if((prZ .ge. -BReflectorThickness()) .and. 
+     &         (prZ .le. (LayerHeight(LayerCount()) + 
+     &                 TReflectorThickness()))) then
+               piLayerID = -1
+               return
+            else
+               piCellID  = -2
+               piLayerID = -2        
+               return
+            endif
+         elseif(rRadius .lt. RingRadius(RingCount())) then
+            if((prZ .gt. LayerHeight(LayerCount())) .and.
+     &         (prZ .lt. (LayerHeight(LayerCount()) + 
+     &                    TReflectorThickness()      ))) then
+               piCellID  = -1
+               piLayerID = -1
+               return
+            elseif((prZ .gt. -BReflectorThickness()) .and.
+     &             (prZ .lt. 0.0)) then
+               piCellID  = -1
+               piLayerID = -1    
+               return
+            endif
+         elseif(rRadius .gt. (RingRadius(RingCount()) + 
+     &          ReflectorThickness())) then
+            piCellID  = -2
+            piLayerID = -2  
+            return
+         endif
+
+  
+!        ----------------------------------------------------------------
+!        INDICATES THAT THE PARTICLE IS WITHIN THE REACTOR CORE STD CELL.
+!        ----------------------------------------------------------------         
+         i = 1
+         do i=1, RingCount(), 1
+            if(i .eq. 1) then
+               if((rRadius .lt. RingRadius(i)) .and.
+     &            (rRadius .ge. 0.0)) then
+                  iI = 1
+                  goto 1
+               endif
+            else
+               if((rRadius .le. RingRadius(i)) .and.
+     &             (rRadius .ge. RingRadius(i-1))) then
+                  iI = i
+                  goto 1
+               endif
+            endif
+         enddo
+1        continue
+
+!        CLASSIFY prX AND prY INTO THE APPROPRIATE QUADRANT.
+         if((prX .lt. 0) .and. (prY .ge. 0)) iQuadrant = 1
+         if((prX .ge. 0) .and. (prY .ge. 0)) iQuadrant = 2
+         if((prX .ge. 0) .and. (prY .lt. 0)) iQuadrant = 3
+         if((prX .lt. 0) .and. (prY .lt. 0)) iQuadrant = 4         
+         select case (iQuadrant)
+            case (1)
+               rTheta = atan(abs(prY/prX))
+            case (2)
+               rTheta = 3.141592654 - atan(abs(prY/prX))
+            case (3)
+               rTheta = 3.141592654 + atan(abs(prY/prX))
+            case (4)
+               rTheta = 2.0*3.141592654 - atan(abs(prY/prX))
+         end select
+         do j=1, 127, 1
+            call CellIndex(j,i,k)
+!           IF THE ITERATION HAS ARRIVED AT RING iI...
+            if(i .eq. iI) then
+               if(k .eq. 1) then
+                  rTemp1 = ThetaFromIndex(i, k)
+                  rTemp2 = ThetaFromIndex(i, nRing(iI))
+                  if((rTheta .le. rTemp1) .and. (rTheta .ge. 0.0)) then
+                     iID = j
+                     goto 2
+                  elseif((rTheta .le. (2.0*3.141592654)) 
+     &               .and. (rTheta .ge. rTemp2)) then
+                     iID = j
+                     goto 2                  
+                  endif
+               else
+                  rTemp1 = ThetaFromIndex(i, k)
+                  rTemp2 = ThetaFromIndex(i, k-1)       
+                  if((rTheta .le. rTemp1) .and.
+     &             (rTheta .ge. rTemp2)) then
+                     iID = j
+                     goto 2
+                  endif       
+               endif
+            endif
+         enddo
+2        continue
+         i = 1
+         do i=1, LAYER_COUNT, 1
+            if(i .eq. 1) then
+               if((prZ .le. LayerHeight(i)) .and. 
+     &            (prZ .ge. 0.0)) then
+                  iL = 1
+                  goto 3
+               endif
+            else
+               if((prZ .le. LayerHeight(i)) .and.
+     &            (prZ .gt. LayerHeight(i-1))) then
+                  iL = i
+                  goto 3
+               endif
+            endif
+         enddo
+3        continue      
+         
+         piCellID  = iID
+         piLayerID = iL
+         
+         return
+
+      end subroutine
+      
+      subroutine GetCurrentCell(prX, prY, prZ, piCellID, piLayerID)
+
+         implicit none
+
+         real,    intent(in)  :: prX, prY, prZ
+         integer, intent(out) :: piCellID, piLayerID
+         real    :: rRadius, rTheta, rZ, rTemp1, rTemp2
+         integer :: iI, iK, iL, iID, i, j, k, m, iQuadrant
+         real    :: rYX, rAtanYX
+         piCellID  = -2
+         piLayerID = -2
+
+         rRadius = sqrt(prX**2 + prY**2)
+
 !        ----------------------------------------------------------------
 !        INDICATES THAT THE PARTICLE IS WITHIN REFLECTOR. RETURNS (-1,-1)
 !        IF THE PARTICLE IS OUTSIDE THE REFLECTOR & CORE, RETURNS (-2,-2)
@@ -192,12 +370,75 @@
             return
          endif
          
-
+!   TOP AND BOTTOM RE
+c         if((prZ .lt. -BReflectorThickness()) .or. 
+c     &      (prZ .gt. (LayerHeight(LayerCount()) + 
+c     &                 TReflectorThickness()))) then
+c               piCellID  = -2
+c               piLayerID = -2        
+c               return            
+c         endif
+c         if((rRadius .ge. RingRadius(RingCount())) .and.
+c     &      (rRadius .le. (RingRadius(RingCount()) + 
+c     &                     ReflectorThickness()))   ) then
+c            piCellID  = -1
+c            if((prZ .ge. 0.0) .and. 
+c     &         (prZ .le. (LayerHeight(LayerCount())))) then
+c               piLayerID = -1
+c               return
+c            else
+c               piCellID  = -2
+c               piLayerID = -2        
+c               return
+c            endif
+c         elseif(rRadius .lt. RingRadius(RingCount())) then
+c            if((prZ .gt. LayerHeight(LayerCount())) .and.
+c     &         (prZ .lt. (LayerHeight(LayerCount()) + 
+c     &                    TReflectorThickness()      ))) then
+c               piCellID  = -1
+c               piLayerID = -1
+c               return
+c            elseif((prZ .gt. -BReflectorThickness()) .and.
+c     &             (prZ .lt. 0.0)) then
+c               piCellID  = -1
+c               piLayerID = -1    
+c               return
+c            endif
+c         elseif(rRadius .gt. (RingRadius(RingCount()) + 
+c     &          ReflectorThickness())) then
+c            piCellID  = -2
+c            piLayerID = -2  
+c            return
+c         endif
   
 !        ----------------------------------------------------------------
 !        INDICATES THAT THE PARTICLE IS WITHIN THE REACTOR CORE STD CELL.
 !        ----------------------------------------------------------------         
-         iI = int((RING_COUNT*rRadius/RingRadius(RING_COUNT))) + 1
+
+c         iI = int(ceiling(real(RING_COUNT)*rRadius
+c     &         /RingRadius(RING_COUNT)))
+         i = 1
+         do i=1, RingCount(), 1
+            if(i .eq. 1) then
+               if((rRadius .lt. RingRadius(i)) .and.
+     &            (rRadius .ge. 0.0)) then
+                  iI = 1
+                  goto 1
+               endif
+            else
+               if((rRadius .lt. RingRadius(i)) .and.
+     &             (rRadius .ge. RingRadius(i-1))) then
+                  iI = i
+                  goto 1
+               endif
+            endif
+         enddo
+1        continue         
+         if(iI .eq. 1) then
+            piCellID = 1
+            goto 2
+         endif
+
 
 !        CLASSIFY prX AND prY INTO THE APPROPRIATE QUADRANT.
          if((prX .lt. 0) .and. (prY .ge. 0)) iQuadrant = 1
@@ -217,9 +458,29 @@
                rTheta = 6.283185308 - atan(abs(prY/prX))
          end select
          
-         iID = int(floor(rTheta*naA(iI)/6.283185308)) + naB(iI-1)   
-         iL  = int((LAYER_COUNT*prZ/LayerHeight(LAYER_COUNT))) + 1
-         piCellID  = iID
+         iID = int(ceiling(rTheta*naA(iI)/6.283185307) + naB(iI))
+         piCellID  = iID         
+2        continue
+c         iL  = int(ceiling(real(LAYER_COUNT)*prZ
+c     &         /LayerHeight(LAYER_COUNT)))
+         i = 1
+         do i=1, LAYER_COUNT, 1
+            if(i .eq. 1) then
+               if((prZ .le. LayerHeight(i)) .and. 
+     &            (prZ .ge. 0.0)) then
+                  iL = 1
+                  goto 3
+               endif
+            else
+               if((prZ .le. LayerHeight(i)) .and.
+     &            (prZ .gt. LayerHeight(i-1))) then
+                  iL = i
+                  goto 3
+               endif
+            endif
+         enddo
+3        continue      
+ 
          piLayerID = iL
          
          return
@@ -299,11 +560,13 @@
 
       subroutine InitCellIndex()
          integer :: i, j, k 
+         real :: rVolume
          
          do j=1, 127, 1
             call CellIndex(j,i,k)
             CELL_INDEX(j,1) = i 
             CELL_INDEX(j,2) = k
+            CELL_VOLUME = CellVolume(j, 1)
          enddo
          
          return
@@ -791,7 +1054,7 @@ c         enddo
          call CellIndex(piCellID , iI, iK)
          iL = piLayerID
          
-         if((piCellID .eq. 1) .and. (piLayerID .eq. 1)) then
+         if((piCellID .eq. 1)) then
          
             rRi = RingRadius(1)
             rHl = LayerHeight(1)
