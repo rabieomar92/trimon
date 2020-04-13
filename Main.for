@@ -30,7 +30,7 @@
          integer :: iStatus, i
          integer :: iTXSUnit = 20
          integer :: iSeed, nHistories, nCycle, nSkip, nRing  
-         integer :: NFI = 12    
+         integer :: NFI = 121 
          integer :: tCol, tC, tL, tG 
          real    :: rStart, rFinish
          real    :: keffGuess
@@ -40,40 +40,91 @@
          logical :: lFlag
          character(len=30) :: cRunID
          character(len=30) :: tDate, tTime
+                  call cpu_time(rStart)    
+
          ! HERE WE GENERATE RUN ID FOR SIMULATION IDENTIFICATION PURPOSE
          call date_and_time(DATE=tDate,TIME=tTime)       
          cRunID = trim(tDate)//'-'// tTime(1:6)// '-'// tTime(8:10) 
-         print*,'  _____ _____  _  __  __  ____  __  _  '
-         print*,' |_   _|| () )| ||  \/  |/ () \|  \| | '
-         print*,'   |_|  |_|\_\|_||_|\/|_|\____/|_|\__| '
-         
-         print*,'        Version 1.180929.142800    '
+         print*
+c         print*,' TRIMON-HGMC Version 1.190430.2335'
+         print*,' TRIMON-PACKAGE Version 1.190430.2335'
+         print*,' (c) 2018 Malaysian Nuclear Agency'
+         print*,' (c) 2018 Universiti Sains Malaysia'
          print* 
-            
          if(iargc() .eq. 1) then
             call getarg(1, cTXSFileName)
             if(cTXSFileName .eq. '-update-burnup') then
-               call BurnupCalculation()
-               goto 98
+               call BurnupCalculation(cRunID)
+               print*, ' BURN: Job ended.'
+               stop
             elseif(cTXSFileName .eq. '-validate-txs') then
                cTXSFileName = 'xsdata.txs'
                open(unit=iTXSUnit, file=cTXSFileName, err=95)
                call TXSVALIDATE(iTXSUnit, lFlag, .false.)
                close(unit=iTXSUnit)
                goto 98
+            
+            elseif(cTXSFileName(1:1) .eq. '-') then
+               print*, ' HGMC: Fatal error. Invalid parameter.'
+               stop
+            else
+               print*, ' HGMC: Loading cross section data from ',
+     &             trim(cTXSFileName)
+               open(unit=915, file=cTXSFileName, status='old',
+     &              err=989)
+               close(unit=915)
+               goto 43
+989            print*, ' HGMC: Fatal error. The provided TXS',
+     &            ' tape does not exists.'
+               stop
+43             continue
             endif
-       
          else
             cTXSFileName = 'xsdata.txs'
+            call system("libreader")
          endif
-         print*, ' HGMC: Loading cross section data from ',
-     &           trim(cTXSFileName)
-         open(unit=NFI, file='MAIN.INP', status='old',err=96)
+         
+
+
+         open(unit=NFI, file='MAIN.INP', status='unknown',err=96)
          call rasearch(NFI,0,'#KRUN', 5, cTextTrv, iStatus)
          if (iStatus .gt. 0) goto 99
-         read(NFI,*,end=97,err=97) iSeed, nHistories, nCycle, nSkip,
-     &       OUTLIER_CONTROL
+         read(NFI,*,end=97,err=97) iSeed, nHistories, nCycle, nSkip
          read(NFI,*,end=97,err=97) keffGuess
+         print'(A,I0,2A)', '  HGMC: ', nHistories, 
+     &      ' neutron histories will be simulated.'
+         if(nCycle .lt. nSkip) then
+            print*, ' HGMC: Warning. ',
+     &         'The number of cycles is less than the',
+     &         'number of skip cycles.'
+            print*, ' HGMC: Total number of cycles is',
+     &            ' adjusted to 2*NSKIP.'
+            nCycle = 2*nSkip
+         endif
+         
+         if(keffGuess .lt. 0.0) then
+            print*, ' HGMC: Warning. The initial guess of',
+     &            ' k-eff is less than zero.'
+            print*, ' HGMC: The magnitude of k-eff is used instead.'
+            keffGuess = abs(keffGuess)
+         endif
+         if(iSeed .lt. 0) then
+            print*, ' HGMC: Warning. Random number generator seed is',
+     &         ' less than zero.'
+            print*, ' HGMC: The seed is set to 92090914.'
+            iSeed = 92090914
+         endif
+         if(nHistories .lt. 3000) then
+            print*, ' HGMC: Warning. ',
+     &         'Insufficient neutron histories (N<3000)'
+            print*, ' HGMC: Adjusting to 5000 histories.'
+            nHistories = 5000
+         elseif(nHistories .gt. BANK_SIZE) then
+            print*, ' HGMC: Warning. The prescribed number of',
+     &              ' histories is too large.'
+            print*, ' HGMC: Adjusting to 50000 histories.'
+            nHistories = 30000
+         endif
          
          call rasearch(NFI,0,'#NRINGS', 7, cTextTrv, iStatus)
          if (iStatus .gt. 0) goto 92
@@ -93,53 +144,73 @@
          if (iStatus .gt. 0) goto 92
          read(NFI,*,end=91,err=91) NOMINAL_POWER
          
-         close(unit=NFI)
+
          
          open(unit=iTXSUnit, file=cTXSFileName, err=95)
 !        HERE WE INITIALIZE CELL INDICES FOR MORE CODE PERFORMANCE
 !        THIS IS TO PREVENT EXTRA LOOPS WHEN SEARCHING FOR CELL INDEX.
          call InitCellIndex()
          call InitTXSReader(iTXSUnit)
-         print'(A,$)', '  HGMC: Initializing tally counter.'
+         print*, ' HGMC: Initializing.'
+         if(LAYER_COUNT .ne. TXS_LAY) then
+            print*, ' HGMC: Warning. Library layer count mismatch.'
+            print'(A,A,I0,A)',
+     &       '        Rectifying the problem by setting layer',
+     &         ' count to ', TXS_LAY, '.'
+            LAYER_COUNT = TXS_LAY
+         endif
+         if((RING_COUNT .eq. 6) .and. (TXS_CEL .eq. 92)) then
+            goto 126
+         else
+            if((RING_COUNT .eq. 7) .and. (TXS_CEL .eq. 128)) then
+               goto 126
+            else
+               print*, ' HGMC: Fatal Error. The incompatible library.'
+               print*, '       Please consider changing the ring count.'
+               stop
+            endif         
+         endif
+126      continue         
          call InitTally()
-         print*, 'Done.'
          call TXSGetTable(iTXSUnit, istatus)
-         print'(A,$)', '  HGMC: Initializing fission bank.'
+         
          call InitNeutronBank()
-         print*, 'Done.'
-         print'(A,$)', '  HGMC: Initializing random numbers.'
          call InitRnd(10000000_8,500000_8,int(iSeed,8))
-         print*, 'Done.'
-         call cpu_time(rStart)    
+
          call CalculateKeff(nHistories,nCycle, nSkip, keffGuess,
      &      cRunID)
+         close(unit=NFI)
          call BurnupCalculation(cRunID)
          call cpu_time(rFinish)
-         print'("  HGMC: Total CPU time ",G0.3," sec(s).")',
-     &       (rFinish - rStart)
+         print'("  HGMC: Total CPU time ",F0.3," min(s).")',
+     &       (rFinish - rStart) / 60.0
          goto 98
          
 ! HERE ARE THE ERROR MESSSAGES...
-91       print*, ' Fatal Error: NRINGS card is not valid.'
+91       print*, ' HGMC: Fatal Error. NRINGS card is not valid.'
          goto 100
-92       print*, ' Fatal Error: NRINGS card is not found.'
+92       print*, ' HGMC: Fatal Error. NRINGS card is not found.'
          goto 100
-93       print*, ' Fatal Error: DIMENSIONS card is not valid.'
+93       print*, ' HGMC: Fatal Error. DIMENSIONS card is not valid.'
          goto 100
-94       print*, ' Fatal Error: DIMENSIONS card is not found.'
+94       print*, ' HGMC: Fatal Error. DIMENSIONS card is not found.'
          goto 100
-95       print*, ' Fatal Error: TRIGA Cross Section file',
+95       print*, ' HGMC: Fatal Error. TRIGA Cross Section file',
      &           ' (.txs) is not found.'
          goto 101
-96       print*, ' Fatal Error: The input file is not found.'
+96       print*, ' HGMC: Fatal Error. The input file is not found..'
          goto 101
-97       print*, ' Fatal Error: KRUN card input is not valid.'
+97       print*, ' HGMC: Fatal Error. KRUN card input is not valid.'
          goto 100
-99       print*, ' Fatal Error: KRUN card is not found',
+99       print*, ' HGMC: Fatal Error. KRUN card is not found',
      &           ' in the input file.'
 100      close(unit=NFI)
-98       print*, ' HGMC: Code execution terminated successfully!'
-101   end program
+98       print*, ' HGMC: Job ended.'
+       !  call system("pause")
+
+101      continue
+
+      end program
 
       subroutine rasearch(pNF, pnSkip, pcText, pnTextLen, 
      &                    pcTextRV, piFlag)
@@ -160,3 +231,5 @@
 999      piFlag = 1
          return
       end subroutine
+      
+  
