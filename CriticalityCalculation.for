@@ -1,6 +1,6 @@
 !                                                                       
-!     Eigenvalue Calculation Module, Revision 180915-1.
-!     Author M. R. Omar, October 2017. All copyrights reserved, 2017.
+!     Eigenvalue Calculation Module, Revision 200413-1.
+!     Author M. R. Omar, October 2020. All copyrights reserved, 2020.
 !     (c) Universiti Sains Malaysia
 !     (c) Malaysian Nuclear Agency
 !
@@ -14,7 +14,7 @@
 !     owners.
 !
 !     This source code was created on 1/11/2017 11:15 PM by M. R. Omar.
-!     Last revision date 15/9/2018.
+!     Last revision date 13/4/2020. Adapted survival biasing technique.
 !
 !     THIS MODULE CONTAINS THE NECESSARY METHODS THAT ENABLE THE CODE USER AND
 !     PROGRAMMERS TO DO CRITICALITY CALCULATION OF A TRIGA REACTOR CORE.
@@ -33,21 +33,35 @@
          
          
          ! KEFF_GUESS STORES THE INITIAL GUESS OF K-EFF.
-         real :: KEFF_GUESS = 1.0
-         real :: NOMINAL_POWER = 1000.0
-         real :: OUTLIER_CONTROL = 0.020
+         real    :: KEFF_GUESS = 1.0
+         real    :: NOMINAL_POWER = 1000.0
          ! KEFF_WGT IS THE PARTICLE WEIGHT THAT HELPS TO COMPENSATE THE PROBLEM
          ! IN WHICH THE FISSION NEUTRON  SITE COUNT  IS  NOT ENOUGH TO INITIATE
          ! NEXT NEUTRON GENERATION CYCLE.
          real    :: KEFF_WGT     = 1.0
+         real    :: KEFF_WCUT    = 0.00001
+         real    :: KEFF_WSUR    = 1.0
+         
+         ! DEFINING K-EFF ESTIMATORS.
+         ! TRACKLENGTH KEFF ESTIMATOR
+         real :: KEFF_TRLEST = 0.0
+         ! ABSORPTION KEFF ESTIMATOR
+         real :: KEFF_ABSEST = 0.0
+         ! COLLISION KEFF ESTIMATOR
+         real :: KEFF_COLEST = 0.0 
+         
          ! KEFF_CYCLE INDICATES THE CURRENT CALCULATION CYCLE
          integer :: KEFF_CYCLE   = 1
+         integer :: KEFF_SKIP    = 1
+         
          ! TOTAL_CYCLE STORES THE TOTAL NUMBER OF CYCLE SET BY THE USER. THIS
          ! SHARED VARIABLE WILL BE SET OUTSIDE THIS MODULE.
          integer :: TOTAL_CYCLE  = 1
          ! INITIAL_HSRC IS THE INITIAL VALUE OF SOURCE SHANNON ENTROPY FOR CAL-
          ! CULATION.
          real    :: INITIAL_HSRC = 0.0
+         real    :: SRC_H(50,127)
+         
       contains
          
 !        ----------------------------------------------------------------------
@@ -69,15 +83,20 @@
             integer, intent(in) :: pnCycles       ! NO. OF  CALCULATION CYCLES.
             integer, intent(in) :: pnSkip         ! CALCULATION SKIP COUNT.
             real   , intent(in) :: prKeffGuess    ! INITIAL GUESS OF K-EFF
-            character(len=30), intent(in) :: pcRunID            
+            character(len=30), intent(in) :: pcRunID 
+
             ! PRIVATE VARIABLES
             integer :: iNID
             integer :: iCycle
+            integer :: nTotal
             real    :: rKeff                ! VALUE OF K-EFF FOR CURRENT CYCLE.
             real    :: rKeffAvg             ! A MOVING AVERAGE VALUE  OF K-EFF.
             real    :: rKeffSqAvg           ! A MOVING AVERAGE VALUE OF K-EFF^2
             real    :: rKeffError           ! STANDARD ERROR OF K-EFF.
-            integer :: i, j, k, nTotCycles          ! MULTI-PURPOSE INTEGER VAR.
+            real    :: rHSrcAvg             ! A MOVING AVERAGE VALUE  OF H-SRC.
+            real    :: rHSrcSqAvg           ! A MOVING AVERAGE VALUE OF H-SRC^2
+            real    :: rHSrcError           ! STANDARD ERROR OF H-SRC.
+            integer :: i, j, k, n, nTotCycles          ! MULTI-PURPOSE INTEGER VAR.
             integer :: NFO = 24
             integer :: NFT = 26
             character(len=40) :: cNumText
@@ -85,17 +104,29 @@
             integer :: iCPUMinutes, iCPUSeconds, iCPUMinTot, iCPUSecTot
             real    :: rX, rX2, rxBar, rx2Bar, rSBar, rRErr, rFOM
             real    :: rCurrentError
+            real    :: rTotalSeconds = 0.0            ! TOTAL CPU TIME TAKEN WHEN RUNNING THE WHOLE BATCHES
+            real    :: rTotalActiveSeconds = 0.0      ! TOTAL CPU TIME TAKEN WHEN RUNNING ACTIVE BATCHES
             character(len=80) :: caKeffLine(1000000)
-
+            real :: rShannonH
+            character(len=4) cDummy
+            real    :: raHSrc(pnCycles)
+            
+            
             ! SETTING  THE  AVERAGE VALUES  TO ZERO BEFORE BEGIN KEFF AVERAGING. 
             ! CALCULATION.
             rKeffAvg   = 0.0
             rKeffSqAvg = 0.0
+            rHSrcAvg   = 0.0
+            rHSrcSqAvg = 0.0
             TOTAL_CYCLE = pnCycles
             iCPUMinTot = 0
             iCPUSecTot = 0
+            KEFF_SKIP = pnSkip
+            raHSrc(:) = 0.0d0
+            
             ! OPEN FILE FOR WRITING THE K-EFF VALUE FOR ALL CYCLES.
-            open(unit=NFO,file='KEFF.OUT',status='unknown')
+            open(unit=NFO, file='KEFF.OUT', status='unknown')
+            open(unit=NFT, file='TRACK.OUT', status='unknown')
             write(NFO,'(2A)') '  EFFECTIVE MULTIPLICATION ',
      &                       'FACTOR CALCULATION RESULT'
             write(NFO,'(2A)') '  =========================',
@@ -117,36 +148,47 @@
      
             write(NFO,'(A)') ''
             write(NFO,'(A,68A1)') '  ', ('-',i=1,68)
-            write(NFO,'(A10,2X,A10,2X,A10,2X,A10,2X,A13)') 'CYCLE',
+            write(NFO,'(A10,6(2X,A10))') 'CYCLE',
      &         'K-EFF', ' AVG K-EFF', 'STDEV', 'H-SRC', 'CPU TIME'
             write(NFO,'(A,68A1)') '  ', ('-',i=1,68)
-            ! OPEN FILE FOR WRITING NEUTRON TRACKS OF THE FIRST 1000 HISTORIES.
-c            open(unit=NFT,file='TRACK.OUT',status='unknown')
+
             ! SETTING THE INITIAL GUESS OF K-EFF.
             KEFF_GUESS = prKeffGuess
             rKeff = KEFF_GUESS
             nTotCycles = pnCycles
+            N_KEFFHIS = pnHistories
+
             ! HERE WE SEGREGATE THE INITIAL GUESS OF FISSION  SRC. DISTRIBUTION
             ! BY SETTING A MONO-ENERGETIC POINT SRC. AT THE CENTRE OF EACH UNIT
             ! CELL OF THE TRIGA CORE.
             call SegregateNeutronSource(pnHistories)
             
-            ! PRINTING K-EFF TABLE HEADER.
+            ! PRINTING K-EFF TABLE HEADER IN CONSOLE OUTPUT
             print*
-            write(*,'(A,67A1)') '  ', ('-',i=1,67)
-            write(*,'(A10,2X,A10,2X,A10,2X,2A10,A13)') 'CYCLE',
-     &         'K-EFF', ' AVG K-EFF', 'STDEV', 'H-SRC', 'CPU TIME'
-            write(*,'(A,67A1)') '  ', ('-',i=1,67)
+            write(*,'(A,75A1)') '  ', ('-',i=1,75)
+            write(*,'(A10,2X,A10,2X,A10,2X,2A10,A11,A10)') 'CYCLE',
+     &         'K-EFF', ' AVG K-EFF', 'STDEV', 'H-SRC', '   T/CYCLE',
+     &         'CTM'
+            write(*,'(A,75A1)') '  ', ('-',i=1,75)
             ! PRINT THE INITIAL GUESS OF K-EFF (CYCLE-0)
-            write(*,'(I10,2X,F10.5,2X,A10,2X,A10,F10.3)') 
-     &            0, KEFF_GUESS, 'SKIP', 'GUESS', -1.0
-     &            * log(1.0/real(TXS_LAY*TXS_CEL))/log(2.0)
-            write(NFO,'(I10,2X,F10.5,2X,F10.5,2X,A10,F10.5)')
+            call cpu_time(rCPUStart)
+            write(*,
+     &      '(I10,2X,F10.5,2X,A10,2X,A10,F10.3,2X,F8.1,A,F9.3)')
+     &            0, KEFF_GUESS, 'GUESS', 'INACTIVE', -1.0
+     &            * log(1.0/real(1*1))/log(2.0),
+     &             0.0, 's ', rCPUStart/60.0
+            write(NFO,'(I10,2X,F10.5,2X,A10,2X,A10,2X,F10.5,2X,A10)')
      &             0, KEFF_GUESS,
-     &            0.0, 0.0, -1.0
-     &            * log(1.0/real(TXS_LAY*TXS_CEL))/log(2.0)
+     &            '-', '-', -1.0
+     &            * log(1.0/real(1*1))/log(2.0), '-'
+     
             ! BEGIN THE CYCLE LOOP, THE NUMBER OF CYCLES IS pnCycles.
             do iCycle=1, nTotCycles, 1     
+            
+            ! RESET ALL K-EFF ESTIMATORS
+            KEFF_TRLEST = 0.0
+            KEFF_ABSEST = 0.0
+            KEFF_COLEST = 0.0
             
 !-----------HERE WE START THE CPU TIME COUNTER
             call cpu_time(rCPUStart)
@@ -155,79 +197,78 @@ c            open(unit=NFT,file='TRACK.OUT',status='unknown')
             ! FISSION NEUTRONS IN FISSION BANK (N_KEFFSRC) TO ZERO.
             call ClearFissionBank()
 312         call ResetTally()
-            
             ! HERE WE LOOP  TO  SIMULATE ALL NEUTRON SOURCES.  WE TRACK NEUTRON
             ! HISTORIES  TO  OBTAIN  ψ(n+1).  iNID   IS THE  NEUTRON ID THAT IS 
             ! CURRENTLY BEING TRACKED. WE SET THE INITIAL  NEUTRON ID TO 1.  
             ! THE RULE OF THUMB: 0 < NID <= N_KEFFHIS.
             iNID = 0
-            
-            
+
             ! WHILE NOT ALL NEUTRONS IN THE MAIN BANK ARE TRACKED.
-            !$OMP PARALLEL DO
             do while (iNID .lt. N_KEFFHIS)
 
                iNID = iNID + 1
-             
                ! BEGIN TRACK NEUTRON ID = iNID.  THIS WILL SET THE NEUTRON BANK 
                ! ARRAYS CURSOR TO THE DESIRED NEUTRON.
                call BeginTracking(iNID)
                
                ! SHOW USERS CURRENT (NEUTRON-ID)-OF-(NUMBER OF HISTORIES).
-               if(mod(iNID,1000) .eq. 0) then
-                  write(*,'(A,I0,A,I0,A)',advance='no') '  ',
-     &            iNID/1000, 'k/',N_KEFFHIS/1000,
-     &            'k neutrons simulated.' // char(13)
-!     &            '. [', 100*iNID/N_KEFFHIS, '%]'//char(13)
-               endif
+c               if(mod(iNID,10) .eq. 0) then
+c                  call cpu_time(rCPUFinish)
+c                     write(*,'(A,I0,A,F0.2,A,I0,A,A1)',advance='no') 
+c     &            '  > Progress: ',
+c     &             100*iNID/N_KEFFHIS,
+c     &            '%   Rate: ',
+c     &            real(iNID)/(real(rCPUFinish-rCPUStart)/3600.0)
+c     &            /1000000, 'M n/hr  NID: ', TRACK_NID, 
+c     &            '                         ', char(13)                   
+c
+c               else
+c                     write(*,'(A,I0,A,F0.2,A,I0,A1)',advance='no') 
+c     &            '  > Progress: ', 100*iNID/N_KEFFHIS,
+c     &            '%   Rate: ',
+c     &            real(iNID)/(real(rCPUFinish-rCPUStart)/3600.0)
+c     &            /1000000, 'M n/hr  NID: ', TRACK_NID, char(13)
+c
+c               endif
+               
                ! BEGIN NEUTRON  HISTORY  SIMULATION UNTIL IT IS DEAD OR ESCAPED.
                ! IF THE NEUTRON IS STILL ALIVE AND INSIDE THE REACTOR, ITS ISTAT
                ! VALUE IS ZERO (0) (N_WAIT). CELL ID EQUALS TO -2 INDICATES THAT
                ! THE NEUTRON IS OUTSIDE THE REACTOR CORE.
-               !$OMP PARALLEL DO
-               do while((C_CEL(iNID,1) .ne. -2) .and.
-     &                  (C_CEL(iNID,2) .ne. -2) .and.
-     &                  (ISTAT(iNID,1) .eq. N_WAIT))
-     
+               do while((ISTAT(iNID, 1) .eq. 0) .and.
+     &                  (C_CEL(iNID, 1) .gt. -2) .and.
+     &                  (C_CEL(iNID, 2) .gt. -2) .and.
+     &                  (C_CEL(iNID, 1) .le. TXS_CEL) .and.
+     &                  (C_CEL(iNID, 2) .le. TXS_LAY) .and.
+     &                  (C_GRP(iNID, 1) .gt. 0) .and.
+     &                  (C_GRP(iNID, 1) .le. TXS_GRP))
+
                   ! HERE WE USED A SPECIAL TRANSPORT CODE DESIGNED FOR KEFF CALCU
-                  ! LATION. PROCEED TO KeffTransport() SUBROUTINE FOR MORE INFO.
-                  call KeffTransport()
-c                  if(iCycle .eq. pnCycles) then
-c                     if(iNID .le. 1000) then
-c                        write(NFT, '(I10,3F20.3)') iNID, C_POS(iNID,1),
-c     &                     C_POS(iNID,2), C_POS(iNID,3)
-c                     endif
-c                  endif
+                  ! LATION. PROCEED TO Transport() SUBROUTINE FOR MORE INFO.
+                  call Transport()
                   
+                  ! HERE WE RECORD THE POSITION INTO A FILE FOR NEUTRON TRACK VI-
+                  ! SUALIZATION.
+                  if(iCycle .eq. pnCycles) then
+                     if(iNID .le. 1000) then
+                        write(NFT, '(I10,3F20.3)') iNID, L_POS(iNID,1),
+     &                     L_POS(iNID,2), L_POS(iNID,3)
+                     endif
+                  endif
+                  
+               ! END TRANSPORT TRACKING OF A NEUTRON.
                enddo
-               !$OMP END PARALLEL DO
-               ! IF THE NEUTRON HAS ESCAPED FROM THE REACTOR, WE SET ITS STATUS
-               ! TO N_LOST (=2).
-               if(ISTAT(iNID,1) .eq. N_WAIT) ISTAT(iNID,1) = N_LOST
-              
-            ! END HISTORY ITERATIONS FOR A NEUTRON SOURCE.   
+               ISTAT(iNID,1) = N_LOST
+            ! END HISTORY ITERATIONS FOR A GENERATION CYCLE.   
             enddo
-            !$OMP END PARALLEL DO
-            
-            ! WE ESTIMATE CURRENT K-EFF USING THE FORMULA
-            !
-            !              NO. OF NEUTRONS IN GENERATION (N+1)     N_KEFFSRC
-            !    K-EFF = -------------------------------------- =  ---------
-            !               NO. OF NEUTRONS IN GENERATION (N)      N_KEFFHIS
-            !
-
-
-            if (iCycle .le. pnCycles) then
-               rKeff = real(N_KEFFSRC) / real(N_KEFFHIS)
-            endif
-     
 
             ! WE SET THE GUESS K-EFF OF NEXT CYCLE TO CURRENT K-EFF VALUE.
-            KEFF_GUESS = rKeff
 
-            ! CALCULATE AVERAGES
-            if(iCycle .gt. pnSkip) then
-                 
+            rKeff = KEFF_COLEST / real(N_KEFFHIS)  ! real(N_KEFFSRC) / (real(N_KEFFHIS))
+            KEFF_GUESS = rKeff
+            
+            ! CALCULATE AVERAGES AND STANDARD ERROR
+            if(iCycle .gt. pnSkip) then                 
                rKeffAvg = (1.0 - 1.0 / real(iCycle-pnSkip)) * rKeffAvg +
      &                    rKeff / real(iCycle-pnSkip)
 
@@ -239,41 +280,50 @@ c                  endif
                rKeffError = rKeffError / sqrt(real(iCycle-pnSkip-1))
             endif
 
-            !-----------HERE WE END THE CPU TIME COUNTER
-            call cpu_time(rCPUFinish)
-            ! NOW CALCULATE THE CPU LEAD TIME FOR CURRENT FISSION CYCLE
-            iCPUMinutes = int(floor((rCPUFinish-rCPUStart)/60.0))
-            iCPUSeconds = int(rCPUFinish-rCPUStart)-60*iCPUMinutes
-            iCPUMinTot = iCPUMinTot + iCPUMinutes
-            iCPUSecTot = iCPUSecTot + iCPUSeconds
+            ! CALCULATE THE AVERAGE OF H-SRC FOR DECIDING CONVERGENCE
 
+            
+            ! HERE WE END THE CPU TIME COUNTER
+            call cpu_time(rCPUFinish)
+            rTotalSeconds = rTotalSeconds + rCPUFinish-rCPUStart
+            rShannonH = ShannonEntropy()
             
             ! IF CURRENT CYCLE IS LESS THAN SKIP COUNT,  WE IGNORE PRINTING THE 
             ! MOVING AVERAGE OF K-EFF.
             if(iCycle .le. pnSkip) then
+              
                write(*,
-     &         '(I10,2X,F10.5,2X,A10,2X,A10,F10.3,2X,I6,A2,I2,A1)')
+     &         '(I10,2X,F10.5,2X,A10,2X,A10,F10.6,2X,F8.1,A1,F10.3)')
      &             iCycle, rKeff, 'SKIP', 'INACTIVE',
-     &             ShannonEntropy(), iCPUMinutes, 'm ', iCPUSeconds, 's'
+     &             rShannonH,rCPUFinish-rCPUStart, 's',
+     &            real(rCPUFinish)/60.0
                write(NFO,
-     &         '(I10,2X,F10.5,2X,F10.5,2X,F10.5,I6,A2,I2,A1)') 
-     &             iCycle, rKeff, 0.0,
-     &             ShannonEntropy(), iCPUMinutes, 'm ', iCPUSeconds, 's'
+     &         '(I10,2X,F10.5,2X,A10,2X,A10,2X,F10.5,2X,F9.1,A1)') 
+     &             iCycle, rKeff, '-', '-',
+     &             rShannonH, rCPUFinish-rCPUStart, 's'               
+
             else
+               rTotalActiveSeconds = rTotalActiveSeconds + 
+     &            rCPUFinish-rCPUStart
                write(*,
-     &         '(I10,2X,F10.5,2X,F10.5,2X,F10.5,F10.3,2X,I6,A2,I2,A1)')
+     &      '(I10,2X,F10.5,2X,F10.5,2X,F10.5,F10.6,2X,F8.1,A1,F10.3)')
      &             iCycle, rKeff, rKeffAvg , rKeffError,
-     &             ShannonEntropy(), iCPUMinutes, 'm ', iCPUSeconds, 's'
+     &             rShannonH, rCPUFinish-rCPUStart, 's',
+     &            real(rCPUFinish)/60.0
+c     &            int(1.0/((rKeffError/rKeffAvg)**2 * 
+c     &            rTotalActiveSeconds/60.0))
                write(NFO,
-     &         '(I10,2X,F10.5,2X,F10.5,2X,F10.5, 2X,F10.5,I6,A2,I2,A1)') 
-     &            iCycle, rKeff, rKeffAvg, rKeffError, ShannonEntropy(), 
-     &            iCPUMinutes, 'm ', iCPUSeconds, 's'
+     &         '(I10,2X,F10.5,2X,F10.5,2X,F10.5,2X,F10.5,2X,F9.1,A1)') 
+     &            iCycle, rKeff, rKeffAvg, rKeffError, rShannonH, 
+     &            rCPUFinish-rCPUStart, 's'
             endif
+            
+            raHSrc(iCycle) = rShannonH
             ! NOW WE SET FISSION NEUTRONS AT THE COLLISION SITES AS THE NEUTRON
             ! SOURCE OF THE NEXT CRITICALITY CALCULATION CYCLE.
-            KEFF_WGT = real(N_KEFFHIS) / real(N_KEFFSRC)
-            
-
+            KEFF_WGT = 1.0 ! real(N_KEFFHIS) / real(N_KEFFSRC)
+          
+            ! HERE WE SET THE NEXT GENERATION SOURCE.
             call SetNextGenerationSource()
             
             KEFF_CYCLE = KEFF_CYCLE + 1
@@ -281,21 +331,49 @@ c                  endif
                call UpdateTallyAverages()
             endif
 
-            
             ! END OF CYCLE LOOP
             enddo
             
 
-            
-            write(*,'(A,67A1)') '  ', ('-',i=1,67)
+            ! PRINT THE LINE
+            write(*,'(A,75A1)') '  ', ('-',i=1,75)
             print*
+            n = (pnCycles-pnSkip)/2
+            ! COMPUTE THWE LAST HALF OF THE HSRC AVERAGE VALUE
+            do i=1, n, 1
+               rHSrcAvg = (1.0 - 1.0 / real(i)) * rHSrcAvg +
+     &                    raHSrc(i+n+pnSkip-1) / real(i)
+
+               rHSrcSqAvg = (1.0 - 1.0 / real(i)) 
+     &                     * rHSrcSqAvg +
+     &                    raHSrc(i+n+pnSkip-1)**2 / real(i)
+               rHSrcError = sqrt((rHSrcSqAvg - rHSrcAvg**2) / 
+     &               real(i-1))             
+            enddo
+            
+            do i=1, pnCycles, 1
+               if(abs(raHSrc(i)-rHSrcAvg) .lt. rHsrcError) then
+                  write(*,'(A,I0,2A)') '  HGMC: Cycle ', i,
+     &          ' is the first cycle that falls within one s.d.',
+     &          ' of the source '
+                  write(*,'(2A)') '        entropy population.',
+     &          ' The number of skip cycles should be at least '
+                  write(*,'(A)') '        more than this cycle.'
+                goto 379
+               endif
+            enddo
+379         continue         
+            write(*,'(A,F0.5,A,F0.5,A)') 
+     &      '  HGMC: H-SRC converged to an average value of ',
+     &         rHSrcAvg, ' +/- ', rHSrcError / sqrt(real(n)), '.'
+
             ! WE PRINT THE AVERAGE VALUE OF K-EFF WITH ITS ERROR.
             rKeffError = sqrt((rKeffSqAvg - rKeffAvg**2) / 
-     &               real(iCycle-pnSkip-1))
-            write(*,'(A,F7.5,A,F7.5,A)') '  Estimated k-eff : (', 
-     &         rKeffAvg, ' +/- ', rKeffError, ')'
-
-            write(NFO,'(A,58A1)') '  ', ('-',i=1,58)
+     &               real(iCycle-pnSkip-1)) / 
+     &               sqrt(real(iCycle-pnSkip-1))
+            write(*,'(A,F0.5,A,F0.5,A)') '  HGMC: Estimated k-eff : ',
+     &         rKeffAvg, ' +/- ', rKeffError, '.'
+            write(NFO,'(A,68A1)') '  ', ('-',i=1,68)
             
             rewind NFO
             
@@ -314,36 +392,25 @@ c                  endif
                   write(NFO,'(A,F7.5,A,F7.5,A)') 
      &               '  Estimated k-eff : (', 
      &               rKeffAvg, ' +/- ', rKeffError, ')'
-                  if(iCPUSecTot .gt. 60) then
-                     iCPUMinTot = iCPUMinTot + 
-     &                 int(floor(real(iCPUSecTot)/60.0))
-                     iCPUSecTot = iCPUSecTot - 
-     &                 iCPUMinTot*60
-                     write(NFO,'(A,I0,A,I0,A)')     
-     &                   '  Elapse time     : ',
-     &                   iCPUMinTot, 'm ', iCPUSecTot, 's'     
-                  else
-                     write(NFO,'(A,I0,A,I0,A)')     
-     &                   '  Elapse time     : ',
-     &                   iCPUMinTot, 'm ', iCPUSecTot, 's'     
-                  endif
+                     write(NFO,'(A,G0.3,A)')     
+     &               '  Elapse time     : ',   rTotalSeconds, 's'   
                   write(NFO,'(A,G0.3,A)') 
      &                   '  Processing rate : ',
-     &              real(pnHistories)/(iCPUMinTot*60.0 +
-     &              iCPUSecTot*1.0), ' neutrons/s'
+     &              real(pnHistories)/(rTotalSeconds/pnCycles),
+     &                ' neutrons/s'
                endif
             enddo
             
-
+            call WriteFluxToFile(pcRunID)
+            call WritePowerToFile(NOMINAL_POWER,pcRunID)
+            call WritePowerDistToFile(NOMINAL_POWER,pcRunID)
                
  
             ! CLOSE NEUTRON TRACK FILE AND KEFF FILE.
             close(unit=NFT)
             close(unit=NFO)
             
-            call WriteFluxToFile(pcRunID)
-            call WritePowerToFile(NOMINAL_POWER,pcRunID)
-            call WritePowerDistToFile(NOMINAL_POWER,pcRunID)
+
             return
            
          end subroutine
@@ -355,24 +422,26 @@ c                  endif
 !        THE STANDARD  FIXED  NEUTRON  SOURCE,  THE CHILD NEUTRONS HISTORY  ARE
 !        IMMEDIATELY TRACKED AFTER BORN.
 !        ----------------------------------------------------------------------
-         subroutine KeffTransport()
+         subroutine Transport()
              
             ! PRIVATE VARIABLES
             real :: rDistCol        ! DISTANCE TO THE NEXT NEUTRON COLLISION.
             real :: rDistBoundary   ! NEAREST DISTANCE TO THE CELL BOUNDARY.
             real :: rX, rY, rZ      ! NEUTRON POSITION (x,y,z).
             real :: rU, rV, rW      ! NEUTRON DIRECTION Ω = (u,v,w).
-            
+            integer :: iCell, iLayer
             ! AT THE MOMENT iStatus IS JUST A DUMMY VARIABLE STORING THE STATUS
             ! OF NEUTRON REACTION OPERATIONS.
             integer :: iStatus
-            
+            real :: rYield
+            real :: rDist
+
             ! WE SAMPLE THE DISTANCE TO THE NEXT NEUTRON COLLISION.
             rDistCol = DistanceToNextCollision()
-            
+
             ! WE OBTAIN THE DISTANCE TO THE NEAREST CELL BOUNDARY.
             rDistBoundary = DistanceToNearestBoundary()
-            
+
             ! WE OBTAIN THE CURRENT NEUTRON POSITION IN THE REACTOR.
             rX = C_POS(TRACK_NID, 1)
             rY = C_POS(TRACK_NID, 2)
@@ -381,48 +450,129 @@ c                  endif
             rV = C_DIR(TRACK_NID, 2)
             rW = C_DIR(TRACK_NID, 3)
             
+            rDist = min(rDistCol, rDistBoundary)
             
-            if(rDistCol .gt. rDistBoundary) then 
+            if((rDistCol .gt. rDistBoundary) .and. 
+     &         (rDistBoundary .gt. 0.00001)) then 
+                  
+
                ! THE DISTANCE TO THE NEAREST BOUNDARY IS LESS THAN THE DISTANCE 
                ! TO THE  NEXT COLLISION,  WE TRANSPORT  THE NEUTRON TO THE CELL 
                ! BOUNDARY. r(k+1) = r(k) + D Ω
                rX = rX + rDistBoundary * rU
                rY = rY + rDistBoundary * rV
                rZ = rZ + rDistBoundary * rW
-               call SetNeutronPosition(TRACK_NID, rX, rY, rZ, iStatus)
+               
+                  call GetCurrentCell(rX, rY, rZ,
+     &                               iCell, iLayer)
+                  L_POS(TRACK_NID, 1) = C_POS(TRACK_NID, 1)
+                  L_POS(TRACK_NID, 2) = C_POS(TRACK_NID, 2)
+                  L_POS(TRACK_NID, 3) = C_POS(TRACK_NID, 3)      
+                  C_POS(TRACK_NID, 1) = rX
+                  C_POS(TRACK_NID, 2) = rY
+                  C_POS(TRACK_NID, 3) = rZ
+                  L_CEL(TRACK_NID, 1) = C_CEL(TRACK_NID, 1)
+                  L_CEL(TRACK_NID, 2) = C_CEL(TRACK_NID, 2)
+                  C_CEL(TRACK_NID, 1) = iCell
+                  C_CEL(TRACK_NID, 2) = iLayer
             else
                ! IF COLLISION IS POSSIBLE, WE TRANSPORT THE NEUTRON TOWARDS THE
                ! COLLISION SITE. r(k+1) = r(k) + D_col Ω
                rX = rX + rDistCol * rU
                rY = rY + rDistCol * rV
                rZ = rZ + rDistCol * rW
-               call SetNeutronPosition(TRACK_NID, rX, rY, rZ, iStatus)
+               call GetCurrentCell(rX, rY, rZ,
+     &                               iCell, iLayer)
+  
+                  L_POS(TRACK_NID, 1) = C_POS(TRACK_NID, 1)
+                  L_POS(TRACK_NID, 2) = C_POS(TRACK_NID, 2)
+                  L_POS(TRACK_NID, 3) = C_POS(TRACK_NID, 3)      
+                  C_POS(TRACK_NID, 1) = rX
+                  C_POS(TRACK_NID, 2) = rY
+                  C_POS(TRACK_NID, 3) = rZ
+                  L_CEL(TRACK_NID, 1) = C_CEL(TRACK_NID, 1)
+                  L_CEL(TRACK_NID, 2) = C_CEL(TRACK_NID, 2)
+                  C_CEL(TRACK_NID, 1) = iCell
+                  C_CEL(TRACK_NID, 2) = iLayer   
                
-               ! IF COLLISION IS POSSIBLE WE FIRST  SELECT THE NEUTRON REACTION
-               ! WE SEE WHETHER THE NEUTRONS WILL UNDERGO SCATTERING OR ABSORP-
-               ! TION.
-               if(WillScatter() .eqv. .true.) then
-                  call ScatterNeutron()
+               ! NEXT WE SCORE COLLISION K-EFF ESTIMATOR
+               if (GetSigTot() .gt. 0.0) then
+                  KEFF_COLEST = KEFF_COLEST + C_WGT(TRACK_NID,1) *
+     &               GetNuBar() * GetSigFis() / GetSigTot()                  
+               endif
+
+
+               ! IF COLLISION IS POSSIBLE WE FIRST GENERATE THE FISSION SITES,
+               ! IF THE TOTAL FISSION CROSS SECTION IS > 0.
+               if(GetSigFis() .gt. 0.0) then
+                  call GenerateFissionSites()
+               endif
+               
+               ! HERE IN SURVIVAL BIASING, ABSORPTION REACTION IS PROHIBITED, BUT
+               ! WE REDUCE THE PARTICLE WEIGHT INSTEAD. THIS ROUTINE ADJUSTS THE
+               ! WEIGHT.
+               ! DETERMINE WEIGHT ABSORBED IN SURVIVAL BIASING.
+               if(GetSigAbs() .gt. 0.0) then
+                  call Absorption()
+               endif
+               
+               ! NEXT WE PROCEED FOR RUSSIAN ROULETTE TO DETERMINE WHETHER THE 
+               ! NEUTRON SHOULD BE FURTHER TRACKED OR KO BE KILLED.
+               call RussianRoulette()
+               
+               ! FINALLY, WE PROCESS SCATTERING REACTION.
+               call ScatterNeutron(.true.)
+               
+            endif
+            ! END OF IF-ELSE BLOCK CHECKING WHETHER COLLISION HAPPENS.
+            
+            ! HERE WE SCORE K-EFF TRACKLENGTH TALLY 
+            KEFF_TRLEST = KEFF_TRLEST + C_WGT(TRACK_NID,1) *
+     &         rDist * GetNuBar() * GetSigFis()
+     
+            if(KEFF_CYCLE .le. TOTAL_CYCLE) then
+               ! HERE WE SCORE THE FLUX TRACKLENGTH TALLY. WE SCORE EACH TIME THE 
+               ! NEUTRON MAKE A DEPARTURE.            
+               call ScoreTrackLengthTally(TRACK_NID, 
+     &               KEFF_WGT*real(N_KEFFHIS))
+            endif
+            return
+         end subroutine
+         
+         
+         subroutine Absorption()
+            if(GetSigAbs() .le. 0.0) return
+            if(GetSigTot() .le. 0.0) return
+            ! DETERMINE WEIGHT ABSORBED IN SURVIVAL BIASING.
+            C_AWT(TRACK_NID,1) = C_WGT(TRACK_NID,1) *
+     &         GetSigAbs() / GetSigTot()
+     
+            ! ADJUST CURRENT PARTICLE WEIGHT
+            C_WGT(TRACK_NID,1) = C_WGT(TRACK_NID,1) - 
+     &         C_AWT(TRACK_NID,1)
+            L_WGT(TRACK_NID,1) = C_WGT(TRACK_NID,1)
+
+            ! HERE WE SCORE ABSORPTION KEFF ESTIMATOR.
+            KEFF_ABSEST = KEFF_ABSEST + C_AWT(TRACK_NID,1) *
+     &         GetNuBar() *  GetSigFis() / GetSigAbs()
+         end subroutine
+         
+         subroutine RussianRoulette()
+            real :: rEpsilon            
+            rEpsilon = Rnd(int(TRACK_NID,8))
+            if(C_WGT(TRACK_NID,1) .lt. KEFF_WCUT) then
+               if(rEpsilon .lt. 
+     &               (C_WGT(TRACK_NID,1)/KEFF_WSUR)) then
+                  C_WGT(TRACK_NID,1) = KEFF_WSUR
+                  L_WGT(TRACK_NID,1) = C_WGT(TRACK_NID,1)
                else
-                  ! IF ABSORPTION IS POSSIBLE, WE CHECK WHETHER THE NEUTRON IS 
-                  ! ABSORBED IN FUEL OR BEING CAPTURED.
-                  if(WillFission() .eqv. .true.) then
-                     call KeffFission()
-                  else 
-                     call AbsorbNeutron()
-                  endif
+                  C_WGT(TRACK_NID,1) = 0.0
+                  L_WGT(TRACK_NID,1) = 0.0
+                  ISTAT(TRACK_NID,1) = N_LOST
+                  
                endif
             endif
-            
-            ! FINALLY WE REGISTER  THE LOCATION  OF THE NEUTRON TO THE  NEUTRON
-            ! NEUTRON BANK RECORD.
 
-c            if(KEFF_CYCLE .le. TOTAL_CYCLE) then
-c               call ScoreTrackLengthTally(TRACK_NID, 
-c     &               KEFF_WGT*real(N_KEFFHIS))
-c               return
-c            endif
-            
          end subroutine
          
 !        ----------------------------------------------------------------------         
@@ -433,8 +583,8 @@ c            endif
 !        CAN BE USED  TO SAMPLE THE NEUTRON FISSION SOURCE DISTRIBUTION FOR THE
 !        NEXT CYCLE.
 !        ----------------------------------------------------------------------
-         subroutine KeffFission()
-         
+         subroutine GenerateFissionSites()
+            
             ! rP IS A TABLE THAT CONSISTS OF THE CUMMULATIVE DISTRIBUTION FUNC.
             ! OF THE FISSION NEUTRON ENERGY GROUP. WE SELECT THE OUTGOING ENER-
             ! GY GROUP OF FISSION NEUTRON BY INVERSING THE CUMMULATIVE DIST.
@@ -480,7 +630,8 @@ c            endif
             real    :: rINu, rNu, rNuRes
             integer :: iNu
 
-            real    :: rYield 
+            real    :: rYield, rCosPhi, rSinPhi
+            real    :: rEpsilon1, rEpsilon2
             ! HERE WE OBTAIN ALL OF THE CURRENT NEUTRON IDENTITY.
             iGroup = C_GRP(TRACK_NID, 1)
             iCell  = C_CEL(TRACK_NID, 1)
@@ -489,25 +640,7 @@ c            endif
             rV     = C_DIR(TRACK_NID, 2)
             rW     = C_DIR(TRACK_NID, 3)
             rYield = TXS_TABLE(iLayer, iCell, iGroup, 3)
-            ! PREPARE THE FISSION NEUTRON COUNT. WE TOSS A RANDOM NUMBER.
-            !rEpsilon = Rnd(int(TRACK_NID, 8))
-            
-            ! CALC. THE NUMBER  OF  FISSION NEUTRONS  ACCORDING TO THE INCOMING
-            ! NEUTRON ENERGY.  iNu IS THE INTEGER VERSION OF THE rNu. WE OBTAIN
-            ! THE AVG. NUMBER OF NEUTRONS (rNu)  FROM THE NUBAR-ENERGY CORRELA-
-            ! TION. THIS CAN BE DONE BY USING THE GetNuBar FUNCTION.  SEE FUNC.
-            ! DEFINITION IN NeutronInteractions MODULE.
-            rNu  = GetNuBar()
-         
-            ! NEXT WE SAMPLE THE INTEGER VERSION OF AVG. NUMBER OF FISSION NEU-
-            ! TRONS RELEASED PER FISSION.
-c            rINu = floor(rNu)
-c            if(rEpsilon .le. (rNu - rINu)) then
-c               iNu = int(rINu) + 1
-c            elseif(rEpsilon .gt. (rNu - rINu)) then
-c               iNu = int(rINu)
-c            endif
-            
+
             ! THIS PART IS IMPORTANT TO PREVENT THE SHORTAGE OF NEW FISSION SRC
             ! SITES FOR THE USE OF NEXT CYCLE. THIS IS THE WEIGHTED SAMPLING OF
             ! THE NUMBER OF NEUTRONS TO BE RELEASE DURING  FISSION  REACTION AT 
@@ -518,32 +651,22 @@ c            endif
             !                   Σtot k(n) 
             !
             ! REFER ROMANO & FORGET (OPENMC)
-            
-
-               rNu = KEFF_WGT * (rYield / GetSigTot())
-     &            * (1.0 / KEFF_GUESS) 
-c               rEpsilon = Rnd(int(TRACK_NID,8))
-c               if(rEpsilon .lt. (rNu - floor(rNu))) then
-c                  rNu = floor(rNu)
-c               elseif(rEpsilon .ge. (rNu - floor(rNu))) then
-c                  rNu = floor(rNu) + 1.0
-c               endif
-c               iNu = int(rNu)
            
-               iNu = ceiling(rNu)
-      
 
-            ! HERE WE UPDATE THE NUMBER OF DAUGHTER NEUTRONS PRODUCED
-             if(iNu .le. 0) then
-                NCHLD(TRACK_NID, 1) = 0
-             else
-                NCHLD(TRACK_NID, 1) = iNu
-             endif
-             
+            rNu = C_WGT(TRACK_NID,1) / KEFF_GUESS * rYield 
+     &            / GetSigTot()
+            rEpsilon = Rnd(int(TRACK_NID,8))
+            if(rEpsilon .lt. (rNu - floor(rNu))) then
+               rNu = floor(rNu)
+            elseif(rEpsilon .ge. (rNu - floor(rNu))) then
+              rNu = floor(rNu) + 1.0
+            endif
+            iNu = int(rNu)
+
             ! WE EXIT THIS SUBROUTINE OF THERE IS NO FISSION NEUTRON IS PRODUCED.
             if(iNu .le. 0) return
             
-            
+         
             ! FOR EACH FISSION NEUTRONS PRODUCED, WE SAMPLE ITS OUTGOING ENERGY
             ! AND ITS OUTGOING DIRECTION. THEN WE STORE IT IN THE FISSION BANK.
             !$OMP PARALLEL DO
@@ -556,22 +679,21 @@ c               iNu = int(rNu)
             
             ! NEXT WE PREPARE THE CUMMULATIVE DISTRIBUTION FUNC. OF THE OUTGOING
             ! NEUTRON ENERGY GROUP.
-            rP(1) = 0.0
-            !$OMP PARALLEL DO
-            do j=1, TXS_GRP, 1
-               rP(j+1) = TXS_TABLE(iLayer, iCell, j, 4) + rP(j)
-            enddo
-            !$OMP END PARALLEL DO
             ! THEN USING THE PREPARED RANDOM NUMBER,  rEpsilon,  WE USE THE INVERSE 
             ! METHOD TO SAMPLE THE OUTGOING ENERGY GROUP FROM THE CUMMULATIVE DIST.
-            !$OMP PARALLEL DO
+
+            rP(1) = 0.0
+
             do j=1, TXS_GRP, 1
+               rP(j+1) = TXS_TABLE(iLayer, iCell, j, 4) + rP(j)
                if((rEpsilon .ge. rP(j)) .and.
      &            (rEpsilon .lt. rP(j+1))) then
-                  iFissionEnergyGroup = j
+                 iFissionEnergyGroup = j
+                  goto 569
                endif
             enddo
-            !$OMP END PARALLEL DO
+569         continue
+
             ! **PART II: SAMPLING THE OUTGOING DIRECTION OF THE FISSION NEUTRON.
             ! FIRST WE SAMPLE THE SCATTERING COSINE, μ ∈ (-1, 1).
             rMu = 2.0 * Rnd(int(TRACK_NID,8))  - 1.0
@@ -579,17 +701,12 @@ c               iNu = int(rNu)
             ! NEXT WE SAMPLE A RANDOM NUMBER, ϕ ∈ [0,2π).
             rRandomPhi = 2.0 * PI * Rnd(int(TRACK_NID,8))      
             
+            rCosPhi = cos(rRandomPhi)
+            rSinPhi = sin(rRandomPhi)
             ! NEXT WE CALCULATE THE OUTGOING NEUTRON DIRECTION USING (μ, ϕ).
-            rUNew = rMu * rU + (sqrt(1.0 - rMu**2) * 
-     &              (rU * rW * cos(rRandomPhi) - rV * sin(rRandomPhi))) 
-     &              / sqrt(1.0 - rW**2)
-
-            rVNew = rMu * rV + (sqrt(1.0 - rMu**2) * 
-     &              (rV * rW * cos(rRandomPhi) + rU * sin(rRandomPhi))) 
-     &              / sqrt(1. - rW**2)     
-
-            rWNew = rMu * rW - sqrt(1.0 - rMu**2) *
-     &              sqrt(1. - rW**2) * cos(rRandomPhi)
+            rUNew = rMu
+            rVNew = sqrt(1.0-rMu*rMu) * rCosPhi   
+            rWNew = sqrt(1.0-rMu*rMu) * rSinPhi 
      
             ! THEN WE ADD THE FISSION NEUTRON INTO  THE FISSION BANK SO THAT WE
             ! CAN USE IT LATER AS A SOURCE FOR NEXT CYCLE.
@@ -597,13 +714,13 @@ c               iNu = int(rNu)
      &                               C_POS(TRACK_NID, 2),
      &                               C_POS(TRACK_NID, 3),
      &                               rUNew, rVNew, rWNew,
-     &                               iFissionEnergyGroup, KEFF_WGT)
+     &                               iFissionEnergyGroup, KEFF_WGT,
+     &                               iCell, iLayer)
 
             enddo
             !$OMP END PARALLEL DO
             ! END LOOP FOR EACH NEWBORN FISSION NEUTRON
 
-            call KillNeutron(TXS_GRP, N_FISS, iStatus)
             return
          end subroutine         
          
@@ -617,15 +734,16 @@ c               iNu = int(rNu)
             integer :: i, j, n
             real    :: rEpsilon
             integer :: iRandomNID
-            
+            integer :: nTotal
             ! HERE WE SELECT A NEUTRON FOR N_KEFFHIS TIMES,SO THAT THE NEXT GE-
             ! NERATION HAS THE SAME AMOUNT OF NEUTRON SOURCE. THE SELECTED NEU-
             ! TRON IS THEN TRANSFERED TO THE MAIN NEUTRON BANK.
             !$OMP PARALLEL DO
+            
             do n=1, N_KEFFHIS, 1
             
                ! HERE WE RANDOMLY SHUFFLE THE NEUTRON SELECTIONS.
-1              i = int(ceiling(N_KEFFSRC * Rnd(int(N_KEFFHIS+1,8))))
+1              i = int(ceiling(N_KEFFSRC * Rnd(int(BANK_SIZE-10,8))))
 
                ! IN CASE IF THE COMPUTER GONE CRAZY  AND  ACCIDENTALLY SELECTS 
                ! THE WRONG NEUTRON ID, WE RE-SAMPLE THE NEUTRON ID AGAIN. LOL.
@@ -720,19 +838,26 @@ c               iNu = int(rNu)
          subroutine SampleIsotropicDirection(prU, prV, prW)
             real, intent(out) :: prU, prV, prW
             
-            real :: rEpsilon
+            real :: rEpsilon1, rEpsilon2
             real :: rMu, rPhi
             real, parameter :: PI = 3.141592654
             
-            rEpsilon = Rnd(int(TRACK_NID,8))
-            rMu      = 2.0 * rEpsilon - 1.0
-            rEpsilon = Rnd(int(TRACK_NID,8))
-            rPhi     = 2.0 * PI * rEpsilon
             
-            prU = sqrt(1.0 - rMu**2) * cos(rPhi)
-            prV = sqrt(1.0 - rMu**2) * sin(rPhi)
-            prW = rMu
+594         rEpsilon1 = Rnd(int(TRACK_NID,8))
+            rEpsilon2 = Rnd(int(TRACK_NID,8))
             
+            rEpsilon1 = 2.0*rEpsilon1-1
+            rEpsilon2 = 2.0*rEpsilon2-1
+            if((rEpsilon1**2 + rEpsilon2**2) .gt. 1) then
+               goto 594
+            endif
+
+            prU = 2.0*rEpsilon1**2 + 2.0*rEpsilon2**2 - 1.0
+            prV = rEpsilon1 * sqrt(1.0 - prU**2)/
+     &            sqrt(rEpsilon1**2 + rEpsilon2**2)
+            prW = rEpsilon2 * sqrt(1.0 - prU**2)/
+     &            sqrt(rEpsilon1**2 + rEpsilon2**2)     
+   
             return
          end subroutine
 
@@ -794,19 +919,20 @@ c               iNu = int(rNu)
 
             ! WE BEGIN SEGREGATING THE INITIAL NEUTRON SOURCE AND STORE THEM INT 
             ! THE PRIMARY NEUTRON BANK.
-            !$OMP PARALLEL DO
+
             do iLayer=1, nMaxLayerID, 1
                do iCell=1, nMaxCellID, 1
-                  call CellCentrePoint(iCell, iLayer, rX, rY, rZ)
+    
+                  call CellCentrePoint(iCell, iLayer, rX, rY, rZ)         
                   do i=1, nNeutronPerCell, 1
                      call SampleIsotropicDirection(rU, rV, rW)
                      call AddPrimaryNeutron(rX, rY, rZ, 
-     &                                      rU, rV, rW,
-     &                                      1, KEFF_WGT)
+     &                  rU, rV, rW, 1, KEFF_WGT, 1)    
+
                   enddo         
                enddo
-            enddo          
-            !$OMP END PARALLEL DO
+            enddo   
+            
             return
             
          end subroutine
@@ -817,70 +943,40 @@ c               iNu = int(rNu)
             integer :: nMaxCellID
             real    :: rTotEntropy, rEntropy
             integer :: nTotSitesPerCell
+            SRC_H(:,:) = 0.0d0
             nMaxLayerID = LayerCount()
-            rTotEntropy = 0.0
-            rEntropy = 0.0
-            if(RingCount() .eq. 6) nMaxCellID = 91
-            if(RingCount() .eq. 7) nMaxCellID = 127
-            !$OMP PARALLEL DO
-            do i=1, nMaxLayerID, 1
-               do j=1, nMaxCellID, 1
-                  nTotSitesPerCell = 0
-                  do k=1, N_KEFFSRC, 1
-                     if((FC_CEL(k,1) .eq. j) .and.
-     &                  (FC_CEL(k,2) .eq. i)) then
-                        nTotSitesPerCell = nTotSitesPerCell + 1
-                     endif
-                  enddo
-                  rEntropy = real(nTotSitesPerCell)/real(N_KEFFSRC)
-                
-                  if(nTotSitesPerCell .gt. 0) then
-                     rTotEntropy = rTotEntropy - rEntropy * 
-     &                              log(rEntropy) / log(2.0)                  
-                  endif
-                  
-               enddo
-            enddo
-            !$OMP END PARALLEL DO
-            ShannonEntropy = rTotEntropy
-            return
-         end function
-         
-         subroutine SShannonEntropy()
-            integer :: i, j, k
-            integer :: nMaxLayerID
-            integer :: nMaxCellID
-            real    :: rTotEntropy, rEntropy
-            integer :: nTotSitesPerCell
-            nMaxLayerID = LayerCount()
-            rTotEntropy = 0.0
-            rEntropy = 0.0
-            if(RingCount() .eq. 6) nMaxCellID = 91
-            if(RingCount() .eq. 7) nMaxCellID = 127
             
+            do k=1, N_KEFFSRC, 1
+               
+
+               SRC_H(FC_CEL(k,2), FC_CEL(k,1)) = 
+     &            SRC_H(FC_CEL(k,2), FC_CEL(k,1)) + 1.0                  
+
+
+            enddo
+
+            if(RingCount() .eq. 6) nMaxCellID = 91
+            if(RingCount() .eq. 7) nMaxCellID = 127
+            rTotEntropy = 0.0
             do i=1, nMaxLayerID, 1
                do j=1, nMaxCellID, 1
-                  nTotSitesPerCell = 0
-                  do k=1, N_KEFFSRC, 1
-                     if((FC_CEL(k,1) .eq. j) .and.
-     &                  (FC_CEL(k,2) .eq. i)) then
-                        nTotSitesPerCell = nTotSitesPerCell + 1
-                     endif
-                  enddo
-                  
-                  rEntropy = real(nTotSitesPerCell)/real(N_KEFFSRC)
-                  print*, 'cell=',j,' layer=',i, ' ', rEntropy * 
-     &                           log(rEntropy) / log(2.0)
-                  if(nTotSitesPerCell .gt. 0) then
-                     rTotEntropy = rTotEntropy - rEntropy * 
-     &                              log(rEntropy) / log(2.0)                  
-                  endif
 
-                  
+                   if((SRC_H(i, j) .gt.  0) .and. 
+     &            (SRC_H(i,j) .lt. real(N_KEFFSRC))) then
+                        rEntropy = SRC_H(i,j)/
+     &                    real(N_KEFFSRC)     
+                rTotEntropy = rTotEntropy - rEntropy * 
+     &                              log(rEntropy) / log(2.0)       
+                   endif
+
                enddo
             enddo
 
-            return
-         end subroutine        
-         
+            ShannonEntropy = rTotEntropy
+
+            return 
+            
+         end function
+  
+ 
       end module
